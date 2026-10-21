@@ -9,6 +9,7 @@ import { randomBytes, timingSafeEqual } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { text, id, image, price } from './validation.js';
+import { socialRouter } from './social.js';
 
 let config;
 try { config = (await import('./config.js')).default; }
@@ -17,6 +18,8 @@ if (!config.sessionSecret || config.sessionSecret.length < 32 || config.sessionS
 const db = mysql.createPool({ ...config.mysql, connectionLimit: 10, timezone: 'Z', multipleStatements: false });
 const schema = await readFile(new URL('./schema.sql', import.meta.url), 'utf8');
 for (const statement of schema.split(';').map(s => s.trim()).filter(Boolean)) await db.query(statement);
+const socialSchema = await readFile(new URL('./social-schema.sql', import.meta.url), 'utf8');
+for (const statement of socialSchema.split(';').map(s => s.trim()).filter(Boolean)) await db.query(statement);
 const query = async (sql, args = []) => (await db.execute(sql, args))[0];
 const app = express();
 app.disable('x-powered-by');
@@ -80,8 +83,10 @@ app.post('/api/login', authLimit, async (req, res) => {
 });
 app.post('/api/logout', (req, res, next) => req.session.destroy(err => { if (err) return next(err); res.clearCookie('mv.sid'); res.json({ ok: true }); }));
 app.use('/api', requireUser);
+const social = await socialRouter({ db, query, config, fail, publicUser });
+app.use('/api', social.router);
 app.patch('/api/profile', async (req, res) => {
-  await query('UPDATE users SET name=?,city=?,bio=?,avatar=? WHERE id=?', [text(req.body.name, 80), text(req.body.city, 120, false), text(req.body.bio, 2000, false), image(req.body.avatar), req.user.id]);
+  await social.withImage(req.user.id, req.body.avatar, (execute, url) => execute('UPDATE users SET name=?,city=?,bio=?,avatar=? WHERE id=?', [text(req.body.name, 80), text(req.body.city, 120, false), text(req.body.bio, 2000, false), url, req.user.id]));
   res.json({ ok: true });
 });
 app.get('/api/members/:id', async (req, res) => {
@@ -90,18 +95,19 @@ app.get('/api/members/:id', async (req, res) => {
 });
 app.get('/api/posts', async (req, res) => {
   const groupId = req.query.group ? id(req.query.group) : null;
+  const postId = req.query.post ? id(req.query.post) : null;
   const posts = await query(`SELECT p.*,u.name,u.avatar,
     (SELECT COUNT(*) FROM likes WHERE post_id=p.id) AS like_count,
     EXISTS(SELECT 1 FROM likes WHERE post_id=p.id AND user_id=?) AS liked,
     (SELECT COUNT(*) FROM comments WHERE post_id=p.id) AS comment_count,
     g.name AS group_name FROM posts p JOIN users u ON u.id=p.user_id LEFT JOIN community_groups g ON g.id=p.group_id
-    WHERE u.banned=FALSE ${groupId ? 'AND p.group_id=?' : 'AND p.group_id IS NULL'} ORDER BY p.id DESC LIMIT 50`, groupId ? [req.user.id, groupId] : [req.user.id]);
+    WHERE u.banned=FALSE ${postId ? 'AND p.id=?' : groupId ? 'AND p.group_id=?' : 'AND p.group_id IS NULL'} ORDER BY p.id DESC LIMIT 50`, postId ? [req.user.id, postId] : groupId ? [req.user.id, groupId] : [req.user.id]);
   res.json(posts);
 });
 app.post('/api/posts', async (req, res) => {
   const groupId = req.body.group_id ? id(req.body.group_id) : null;
   if (groupId) { const [member] = await query('SELECT 1 FROM memberships WHERE group_id=? AND user_id=?', [groupId, req.user.id]); if (!member) fail(403, 'Join this group before posting.'); }
-  const result = await query('INSERT INTO posts(user_id,group_id,body,image) VALUES(?,?,?,?)', [req.user.id, groupId, text(req.body.body, 5000), image(req.body.image)]);
+  const result = await social.withImage(req.user.id, req.body.image, (execute, url) => execute('INSERT INTO posts(user_id,group_id,body,image) VALUES(?,?,?,?)', [req.user.id, groupId, text(req.body.body, 5000), url]));
   res.status(201).json({ id: result.insertId });
 });
 async function existing(table, value) {
@@ -110,7 +116,10 @@ async function existing(table, value) {
 }
 app.post('/api/posts/:id/like', async (req, res) => {
   const post = await existing('posts', req.params.id);
-  if (req.body.active === true) await query('INSERT IGNORE INTO likes(post_id,user_id) VALUES(?,?)', [post.id, req.user.id]);
+  if (req.body.active === true) {
+    const result = await query('INSERT IGNORE INTO likes(post_id,user_id) VALUES(?,?)', [post.id, req.user.id]);
+    if (result.affectedRows) await social.notify(post.user_id, req.user.id, 'like', post.id);
+  }
   else await query('DELETE FROM likes WHERE post_id=? AND user_id=?', [post.id, req.user.id]);
   res.json({ ok: true });
 });
@@ -119,8 +128,9 @@ app.get('/api/posts/:id/comments', async (req, res) => {
   res.json(await query('SELECT c.*,u.name,u.avatar FROM comments c JOIN users u ON u.id=c.user_id WHERE c.post_id=? AND u.banned=FALSE ORDER BY c.id LIMIT 100', [id(req.params.id)]));
 });
 app.post('/api/posts/:id/comments', async (req, res) => {
-  await existing('posts', req.params.id);
-  await query('INSERT INTO comments(post_id,user_id,body) VALUES(?,?,?)', [id(req.params.id), req.user.id, text(req.body.body, 2000)]); res.status(201).json({ ok: true });
+  const post = await existing('posts', req.params.id);
+  await query('INSERT INTO comments(post_id,user_id,body) VALUES(?,?,?)', [post.id, req.user.id, text(req.body.body, 2000)]);
+  await social.notify(post.user_id, req.user.id, 'comment', post.id); res.status(201).json({ ok: true });
 });
 app.get('/api/groups', async (req, res) => res.json(await query(`SELECT g.*,u.name AS owner_name,(SELECT COUNT(*) FROM memberships WHERE group_id=g.id) AS members,
   EXISTS(SELECT 1 FROM memberships WHERE group_id=g.id AND user_id=?) AS joined FROM community_groups g JOIN users u ON u.id=g.owner_id WHERE u.banned=FALSE ORDER BY g.id DESC LIMIT 100`, [req.user.id])));
@@ -156,7 +166,7 @@ app.post('/api/events/:id/rsvp', async (req, res) => {
 });
 app.get('/api/listings', async (req, res) => res.json(await query('SELECT l.*,u.name FROM listings l JOIN users u ON u.id=l.user_id WHERE u.banned=FALSE ORDER BY l.sold,l.id DESC LIMIT 100')));
 app.post('/api/listings', async (req, res) => {
-  await query('INSERT INTO listings(user_id,title,description,price,city,image,contact) VALUES(?,?,?,?,?,?,?)', [req.user.id, text(req.body.title, 140), text(req.body.description, 3000), price(req.body.price), text(req.body.city, 120), image(req.body.image), text(req.body.contact, 250)]);
+  await social.withImage(req.user.id, req.body.image, (execute, url) => execute('INSERT INTO listings(user_id,title,description,price,city,image,contact) VALUES(?,?,?,?,?,?,?)', [req.user.id, text(req.body.title, 140), text(req.body.description, 3000), price(req.body.price), text(req.body.city, 120), url, text(req.body.contact, 250)]));
   res.status(201).json({ ok: true });
 });
 app.patch('/api/listings/:id', async (req, res) => {
@@ -166,12 +176,21 @@ app.patch('/api/listings/:id', async (req, res) => {
 });
 const targets = { post: ['posts', 'user_id'], comment: ['comments', 'user_id'], group: ['community_groups', 'owner_id'], event: ['events', 'user_id'], listing: ['listings', 'user_id'] };
 app.delete('/api/content/:type/:id', async (req, res) => {
+  if (req.params.type === 'message') {
+    if (!req.isAdmin) fail(403, 'Only staff can remove reported messages.');
+    const [report] = await query("SELECT 1 FROM reports WHERE target_type='message' AND target_id=?", [id(req.params.id)]);
+    if (!report) fail(403, 'Only reported messages can be moderated.');
+    await query('DELETE FROM messages WHERE id=?', [id(req.params.id)]); res.json({ ok: true }); return;
+  }
   const target = targets[req.params.type]; if (!target) fail(400, 'Invalid content type.');
   const row = await existing(target[0], req.params.id);
   if (!req.isAdmin && row[target[1]] !== req.user.id) fail(403, 'You cannot delete this content.');
   await query(`DELETE FROM ${target[0]} WHERE id=?`, [row.id]); res.json({ ok: true });
 });
 app.post('/api/reports', async (req, res) => {
+  if (req.body.type === 'message') {
+    await social.reportMessage(req, res); return;
+  }
   const target = targets[req.body.type]; if (!target) fail(400, 'Invalid content type.');
   await existing(target[0], req.body.id);
   await query('INSERT INTO reports(user_id,target_type,target_id,reason) VALUES(?,?,?,?)', [req.user.id, req.body.type, id(req.body.id), text(req.body.reason, 2000)]);
@@ -184,6 +203,9 @@ app.get('/api/admin', requireAdmin, async (req, res) => {
 });
 app.get('/api/admin/reports/:id/content', requireAdmin, async (req, res) => {
   const report = await existing('reports', req.params.id);
+  if (report.target_type === 'message') {
+    res.json(await existing('messages', report.target_id)); return;
+  }
   const target = targets[report.target_type];
   if (!target) fail(400, 'Invalid content type.');
   res.json(await existing(target[0], report.target_id));

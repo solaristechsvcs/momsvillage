@@ -1,0 +1,26 @@
+CREATE TABLE IF NOT EXISTS friendships (
+ user_low INT UNSIGNED NOT NULL, user_high INT UNSIGNED NOT NULL, requester_id INT UNSIGNED NOT NULL,
+ status ENUM('pending','accepted') NOT NULL DEFAULT 'pending', created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+ PRIMARY KEY(user_low,user_high), FOREIGN KEY(user_low) REFERENCES users(id), FOREIGN KEY(user_high) REFERENCES users(id),
+ FOREIGN KEY(requester_id) REFERENCES users(id)
+);
+CREATE TABLE IF NOT EXISTS blocks (
+ user_id INT UNSIGNED NOT NULL, blocked_id INT UNSIGNED NOT NULL, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+ PRIMARY KEY(user_id,blocked_id), FOREIGN KEY(user_id) REFERENCES users(id), FOREIGN KEY(blocked_id) REFERENCES users(id)
+);
+CREATE TABLE IF NOT EXISTS messages (
+ id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY, sender_id INT UNSIGNED NOT NULL, recipient_id INT UNSIGNED NOT NULL,
+ body TEXT NOT NULL, read_at DATETIME NULL, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+ INDEX inbox(recipient_id,id), INDEX sent(sender_id,id),
+ FOREIGN KEY(sender_id) REFERENCES users(id), FOREIGN KEY(recipient_id) REFERENCES users(id)
+);
+CREATE TABLE IF NOT EXISTS notifications (
+ id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY, user_id INT UNSIGNED NOT NULL, actor_id INT UNSIGNED NOT NULL,
+ kind VARCHAR(30) NOT NULL, target_id INT UNSIGNED NOT NULL, read_at DATETIME NULL,
+ created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, INDEX inbox(user_id,id),
+ FOREIGN KEY(user_id) REFERENCES users(id), FOREIGN KEY(actor_id) REFERENCES users(id)
+);
+CREATE TABLE IF NOT EXISTS uploads (
+ filename VARCHAR(40) PRIMARY KEY, user_id INT UNSIGNED NOT NULL, bytes INT UNSIGNED NOT NULL,
+ created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, INDEX owner(user_id), FOREIGN KEY(user_id) REFERENCES users(id)
+);

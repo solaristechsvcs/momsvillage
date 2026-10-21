@@ -9,6 +9,7 @@ export function id(value) {
 export function image(value) {
   const input = text(value ?? '', 1000, false);
   if (!input) return '';
+  if (/^\/api\/media\/[a-f0-9]{32}\.webp$/.test(input)) return input;
   try { const url = new URL(input); if (url.protocol === 'https:' && !url.username && !url.password) return url.href; } catch {}
   throw Object.assign(new Error('Images must use an HTTPS URL.'), { status: 400 });
 }

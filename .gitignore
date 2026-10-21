@@ -3,3 +3,4 @@ config.js
 *.log
 .env
 .npm-cache/
+uploads/

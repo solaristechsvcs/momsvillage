@@ -29,3 +29,4 @@ jobs:
       - run: npm test
         env:
           MV_INTEGRATION: '1'
+          MV_UI: '1'

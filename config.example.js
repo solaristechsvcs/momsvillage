@@ -1,6 +1,7 @@
 export default {
   host: '0.0.0.0', port: 3014,
   publicUrl: 'http://localhost:3014',
+  uploadsDirectory: './uploads', // Persistent writable directory. Existing configs default to this.
   sessionSecret: 'REPLACE_WITH_A_UNIQUE_RANDOM_SECRET_AT_LEAST_32_CHARACTERS',
   secureCookies: false, // true when publicUrl uses HTTPS
   trustProxy: false, // 1 if behind one trusted reverse proxy (including Cloudflare Tunnel)

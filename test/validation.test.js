@@ -13,6 +13,8 @@ test('IDs reject SQL fragments, negative numbers, decimals and unsafe integers',
 test('image URLs disallow executable schemes and embedded credentials', () => {
   assert.equal(image('https://example.com/image.jpg'), 'https://example.com/image.jpg');
   assert.equal(image(undefined), '');
+  assert.equal(image('/api/media/0123456789abcdef0123456789abcdef.webp'), '/api/media/0123456789abcdef0123456789abcdef.webp');
+  for (const value of ['/api/media/../../config.js', '/api/media/test.svg', '//example.com/a', '/other/image.png']) assert.throws(() => image(value), { status: 400 });
   for (const value of ['javascript:alert(1)', 'data:image/svg+xml,test', 'http://example.com/a', 'https://name:secret@example.com/a']) assert.throws(() => image(value), { status: 400 });
 });
 test('prices enforce nonnegative decimal currency and database bounds', () => {

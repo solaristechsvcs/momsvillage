@@ -1,7 +1,8 @@
 const $ = s => document.querySelector(s);
 const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+let unread = { messages: 0, notifications: 0 };
 let me = null, csrf = '', page = 'feed', group = null, records = [], generation = 0;
-const labels = { feed: ['⌂', 'Village feed'], groups: ['♧', 'Local groups'], events: ['☷', 'Events'], marketplace: ['◇', 'Marketplace'], profile: ['○', 'My profile'], admin: ['⚙', 'Administration'] };
+const labels = { feed: ['⌂', 'Village feed'], members: ['\u263a', 'Find moms'], friends: ['\u2661', 'Friends'], messages: ['\u2709', 'Messages'], notifications: ['\u2667', 'Notifications'], groups: ['♧', 'Local groups'], events: ['☷', 'Events'], marketplace: ['◇', 'Marketplace'], profile: ['○', 'My profile'], admin: ['⚙', 'Administration'] };
 const avatar = (user, size = '') => user.avatar ? `<img class="avatar ${size}" src="${esc(user.avatar)}" referrerpolicy="no-referrer" alt="${esc(user.name)}">` : `<span class="avatar ${size}" aria-hidden="true">${esc(user.name?.slice(0, 1).toUpperCase() || 'M')}</span>`;
 const logo = '<a class="logo" href="#feed"><span class="logo-mark">♧</span>Moms Village</a>';
 const date = value => new Date(value).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
@@ -30,7 +31,7 @@ function auth(register) {
 }
 function guidelines() { modal('A kinder corner of the internet.', '<p>Be respectful, supportive, and honest. Moms Village is for adults aged 18 and older. Harassment, hate, scams, illegal items, and unsafe content are not welcome.</p><p>Protect your privacy and your children’s privacy. Avoid sharing home addresses, school details, and other sensitive information. Profiles and content are visible to signed-in members; local groups are open groups.</p><p>Report content that breaks these guidelines. Staff can remove content and suspend accounts. Meet marketplace contacts in public and use your own judgment. Marketplace listings are classifieds; Moms Village does not process payments or guarantee transactions.</p><p>Choose what you share. Displaying an external image loads it from its host, which may receive your IP address. Community discussions are peer support and do not replace professional advice.</p>'); }
 function shell() {
-  $('#app').innerHTML = `<header>${logo}<span class="header-note">Your village, wherever you are.</span><div class="account"><span class="muted">Hi, ${esc(me.name.split(' ')[0])}</span><a href="#profile" aria-label="My profile">${avatar(me)}</a><button class="subtle" data-action="logout">Sign out</button></div></header><div class="layout"><aside class="sidebar"><nav aria-label="Main navigation">${Object.entries(labels).filter(([key]) => key !== 'admin' || me.admin).map(([key, [icon, label]]) => `<a class="nav-link ${page === key || (page === 'group' && key === 'groups') ? 'active' : ''}" href="#${key}"><span class="nav-icon">${icon}</span>${label}</a>`).join('')}</nav><div class="side-card"><span>❋</span><h3>A little kindness<br>goes a long way.</h3><p>Every mom’s journey looks different. There’s room for yours here.</p><a href="#guidelines">Our community guidelines ↗</a></div></aside><main id="main"><p class="loading">Gathering the village…</p></main><aside class="rail"><div class="card"><span class="pill">A NOTE FOR YOUR DAY</span><h3>You’re doing better<br>than you think.</h3><p>Some days, showing up is the big win. We’re glad you’re here.</p></div><div class="card"><h3>Make room for connection</h3><p>Find a group close to home or create a gathering of your own.</p><a href="#groups"><button class="secondary full">Explore local groups ↗</button></a></div><div class="card"><h3>Village values</h3><div class="rail-item"><span>♡</span><div><strong>Lead with kindness</strong><small>A supportive space for every chapter.</small></div></div><div class="rail-item"><span>♧</span><div><strong>Share at your own pace</strong><small>You choose what to share.</small></div></div><div class="rail-item"><span>☀</span><div><strong>Help each other grow</strong><small>Small gestures make a difference.</small></div></div></div><div class="footer-note">Moms Village © ${new Date().getFullYear()}<br><a href="#guidelines">Community guidelines</a></div></aside></div>`;
+  $('#app').innerHTML = `<header>${logo}<span class="header-note">Your village, wherever you are.</span><div class="account"><span class="muted">Hi, ${esc(me.name.split(' ')[0])}</span><a href="#profile" aria-label="My profile">${avatar(me)}</a><button class="subtle" data-action="logout">Sign out</button></div></header><div class="layout"><aside class="sidebar"><nav aria-label="Main navigation">${Object.entries(labels).filter(([key]) => key !== 'admin' || me.admin).map(([key, [icon, label]]) => `<a class="nav-link ${page === key || (page === 'group' && key === 'groups') ? 'active' : ''}" href="#${key}"><span class="nav-icon">${icon}</span>${label}${['messages','notifications'].includes(key) ? `<span class="badge" data-count="${key}" ${unread[key] ? '' : 'hidden'}>${unread[key] || ''}</span>` : ''}</a>`).join('')}</nav><div class="side-card"><span>❋</span><h3>A little kindness<br>goes a long way.</h3><p>Every mom’s journey looks different. There’s room for yours here.</p><a href="#guidelines">Our community guidelines ↗</a></div></aside><main id="main"><p class="loading">Gathering the village…</p></main><aside class="rail"><div class="card"><span class="pill">A NOTE FOR YOUR DAY</span><h3>You’re doing better<br>than you think.</h3><p>Some days, showing up is the big win. We’re glad you’re here.</p></div><div class="card"><h3>Make room for connection</h3><p>Find a group close to home or create a gathering of your own.</p><a href="#groups"><button class="secondary full">Explore local groups ↗</button></a></div><div class="card"><h3>Village values</h3><div class="rail-item"><span>♡</span><div><strong>Lead with kindness</strong><small>A supportive space for every chapter.</small></div></div><div class="rail-item"><span>♧</span><div><strong>Share at your own pace</strong><small>You choose what to share.</small></div></div><div class="rail-item"><span>☀</span><div><strong>Help each other grow</strong><small>Small gestures make a difference.</small></div></div></div><div class="footer-note">Moms Village © ${new Date().getFullYear()}<br><a href="#guidelines">Community guidelines</a></div></aside></div>`;
 }
 const heading = (title, subtitle, action, button) => `<div class="page-heading"><div><h1>${esc(title)}</h1><p class="muted">${esc(subtitle)}</p></div>${action ? `<button data-action="${action}">${esc(button)}</button>` : ''}</div>`;
 function postCard(p) {
@@ -41,17 +42,19 @@ async function load() {
   const current = ++generation;
   const route = location.hash.slice(1) || 'feed';
   if (route === 'guidelines') { history.replaceState(null, '', '#feed'); await load(); guidelines(); return; }
-  page = route.startsWith('group/') ? 'group' : labels[route] ? route : 'feed';
+  page = route.startsWith('messages/') ? 'messages' : route.startsWith('group/') ? 'group' : labels[route.split('?')[0]] ? route.split('?')[0] : 'feed';
   if (!me) { landing(); return; }
   shell();
   try {
     let html = '';
-    if (page === 'feed' || page === 'group') {
+    if (['members', 'friends', 'messages', 'notifications'].includes(page)) {
+      html = await socialPage(route);
+    } else if (page === 'feed' || page === 'group') {
       if (page === 'group') {
         const groups = await api('/groups'); group = groups.find(g => g.id === Number(route.split('/')[1]));
         if (!group) throw new Error('Group not found.');
       } else group = null;
-      records = await api(`/posts${group ? `?group=${group.id}` : ''}`);
+      records = await api(`/posts${route.startsWith('post/') ? `?post=${encodeURIComponent(route.split('/')[1])}` : group ? `?group=${group.id}` : ''}`);
       html = group ? heading(group.name, `${group.city} · ${group.members} members · Open group`) + `<p>${esc(group.description)}</p>${group.joined ? composer() : `<div class="card"><p>Join this group to take part in the conversation.</p><button data-action="join" data-id="${group.id}" data-active="true">Join group</button></div>`}` : heading('Your village feed', 'A little connection for your everyday.') + '<section class="hero"><div class="eyebrow">You belong here</div><h2>Motherhood is better<br>with a village.</h2><p>Share the messy middle, celebrate the little things, and find your people.</p><span class="hero-art" aria-hidden="true">♧</span></section>' + composer();
       html += '<div class="section-bar"><h2>The latest conversations</h2><span class="muted">Newest first</span></div>' + (records.map(postCard).join('') || empty('Be the first to say hello.', 'Start a conversation. Your village is listening.'));
     } else if (page === 'groups') {
@@ -61,7 +64,7 @@ async function load() {
     } else if (page === 'marketplace') {
       records = await api('/listings'); html = heading('A new home for old favorites', 'Buy, sell, and pass a little goodness forward.', 'new-listing', '+ List an item') + '<p class="hint">Community classifieds · Prices in USD · Arrange exchanges directly with sellers.</p><input class="search" id="search" type="search" aria-label="Search listings" placeholder="Search items or your city…"><div class="grid" id="cards">' + listingCards(records) + '</div>';
     } else if (page === 'profile') {
-      html = heading('Your little corner', 'Let your village get to know you.') + `<div class="card"><div class="profile-cover"></div>${avatar(me)}${form('profile', field('name', 'Display name', { value: me.name, max: 80 }) + field('city', 'City or area', { value: me.city, max: 120, required: false }) + field('bio', 'About you', { type: 'textarea', value: me.bio, max: 2000, required: false }) + field('avatar', 'Profile picture HTTPS URL', { type: 'url', value: me.avatar, max: 1000, required: false }) + '<p class="hint">These details are visible to signed-in members. Your email stays private.</p>', 'Save profile')}</div>`;
+      html = heading('Your little corner', 'Let your village get to know you.') + `<div class="card"><div class="profile-cover"></div>${avatar(me)}${form('profile', field('name', 'Display name', { value: me.name, max: 80 }) + field('city', 'City or area', { value: me.city, max: 120, required: false }) + field('bio', 'About you', { type: 'textarea', value: me.bio, max: 2000, required: false }) + imageField('avatar', 'Profile picture', me.avatar) + '<p class="hint">These details are visible to signed-in members. Your email stays private.</p><button type="button" class="secondary" data-action="image-library">My image library</button>', 'Save profile')}</div>`;
     } else if (page === 'admin' && me.admin) {
       const data = await api('/admin'); records = data.reports;
       html = heading('Care for the village', 'Review reports and manage community accounts.') + `<section class="card"><h2>Open reports</h2>${data.reports.map(r => `<div class="admin-row"><strong>${esc(r.target_type)} #${r.target_id}</strong><p>${esc(r.reason)}</p><small>Reported by ${esc(r.name)} · ${esc(date(r.created_at))}</small><div class="buttons"><button class="secondary" data-action="review" data-id="${r.id}">View content</button><button class="danger" data-action="delete" data-type="${esc(r.target_type)}" data-id="${r.target_id}">Remove content</button><button class="secondary" data-action="resolve" data-id="${r.id}">Resolve</button></div></div>`).join('') || '<p class="muted">No open reports.</p>'}</section><section class="card"><h2>Members</h2><p class="hint">Showing the newest 200 accounts.</p>${data.users.map(u => `<div class="admin-row"><strong>${esc(u.name)} ${u.banned ? '· Suspended' : ''}</strong><small>${esc(u.email)} · ${esc(u.city)}</small><button class="${u.banned ? 'secondary' : 'danger'}" data-action="ban" data-id="${u.id}" data-active="${!u.banned}">${u.banned ? 'Restore account' : 'Suspend account'}</button></div>`).join('')}</section>`;
@@ -77,23 +80,25 @@ async function comments(postId) {
 }
 document.addEventListener('input', event => {
   if (event.target.id !== 'search') return;
+  if (page === 'members') return;
   const term = event.target.value.toLowerCase(); const filtered = records.filter(r => `${r.name ?? r.title} ${r.city} ${r.description}`.toLowerCase().includes(term));
   $('#cards').innerHTML = page === 'groups' ? groupCards(filtered) : listingCards(filtered);
 });
 document.addEventListener('click', async event => {
   const button = event.target.closest('[data-action]'); if (!button) return;
   event.preventDefault(); const { action, id, type, active } = button.dataset;
+  if (socialActions.has(action)) { await handleSocialClick(button); return; }
   try {
     if (action === 'close') close();
     else if (action === 'login' || action === 'register') auth(action === 'register');
     else if (action === 'guidelines') guidelines();
     else if (action === 'logout') { await api('/logout', 'POST'); me = null; await initialize(); }
-    else if (action === 'post') modal('A thought for your village', form('post', field('body', 'What’s on your mind?', { type: 'textarea', max: 5000 }) + field('image', 'Photo HTTPS URL (optional)', { type: 'url', max: 1000, required: false }), 'Share with the village'));
+    else if (action === 'post') modal('A thought for your village', form('post', field('body', 'What’s on your mind?', { type: 'textarea', max: 5000 }) + imageField('image', 'Photo'), 'Share with the village'));
     else if (action === 'new-group') modal('Bring your people together', form('group', field('name', 'Group name', { max: 100 }) + field('city', 'City or area', { value: me.city, max: 120 }) + field('description', 'What is your group about?', { type: 'textarea', max: 3000 }) + '<p class="hint">Open groups and discussions are visible to all signed-in members.</p>', 'Create group'));
     else if (action === 'new-event') modal('Make a little plan', form('event', field('title', 'Event name', { max: 140 }) + field('location', 'Public meeting place / area', { max: 200 }) + field('starts_at', 'Date and time (your local time)', { type: 'datetime-local' }) + field('description', 'The details', { type: 'textarea', max: 3000 }), 'Create event'));
-    else if (action === 'new-listing') modal('Pass something lovely forward', form('listing', field('title', 'Item name', { max: 140 }) + field('price', 'Price in USD (0 for free)', { type: 'number' }) + field('city', 'City or area', { value: me.city, max: 120 }) + field('description', 'Description and condition', { type: 'textarea', max: 3000 }) + field('image', 'Item photo HTTPS URL (optional)', { type: 'url', max: 1000, required: false }) + field('contact', 'How should buyers contact you?', { max: 250 }) + '<p class="hint">Contact instructions are shared with signed-in members. Choose a contact method you are comfortable sharing.</p>', 'Publish listing'));
+    else if (action === 'new-listing') modal('Pass something lovely forward', form('listing', field('title', 'Item name', { max: 140 }) + field('price', 'Price in USD (0 for free)', { type: 'number' }) + field('city', 'City or area', { value: me.city, max: 120 }) + field('description', 'Description and condition', { type: 'textarea', max: 3000 }) + imageField('image', 'Item photo') + field('contact', 'How should buyers contact you?', { max: 250 }) + '<p class="hint">Contact instructions are shared with signed-in members. Choose a contact method you are comfortable sharing.</p>', 'Publish listing'));
     else if (action === 'comments') await comments(id);
-    else if (action === 'member') { const u = await api(`/members/${id}`); modal(u.name, `<div class="profile-cover"></div>${avatar(u)}<p class="muted">${esc(u.city || 'Part of the village')}</p><p class="member-info">${esc(u.bio || 'Still writing her story.')}</p><small>Joined ${esc(new Date(u.created_at).toLocaleDateString())}</small>`); }
+    else if (action === 'member') await memberModal(id);
     else if (action === 'contact') { const l = records.find(r => r.id === Number(id)); modal(`Contact ${l.name}`, `<p>${esc(l.title)}</p><p class="member-info">${esc(l.contact)}</p><p class="hint">Meet in a public place. Never share sensitive payment or personal information.</p>`); }
     else if (action === 'report') modal('Help care for the village', form('report', `<input type="hidden" name="type" value="${esc(type)}"><input type="hidden" name="id" value="${id}">${field('reason', 'What should the team know?', { type: 'textarea', max: 2000 })}`, 'Send report'));
     else if (action === 'delete') modal('Delete this content?', `<p>This removes the ${esc(type)} and any attached conversations permanently.</p>${form('delete', `<input type="hidden" name="type" value="${esc(type)}"><input type="hidden" name="id" value="${id}">`, 'Delete content')}`);
@@ -115,7 +120,10 @@ document.addEventListener('click', async event => {
 });
 document.addEventListener('submit', async event => {
   const f = event.target.closest('form[data-form]'); if (!f) return; event.preventDefault();
-  const data = Object.fromEntries(new FormData(f)); const submit = f.querySelector('[type=submit]'); submit.disabled = true; f.querySelector('.form-error').textContent = '';
+  if (['member-search','message'].includes(f.dataset.form)) { await socialSubmit(f); return; }
+  if (f.dataset.uploading) { notice('Wait for your photo upload to finish.'); return; }
+  const data = Object.fromEntries(new FormData(f));
+  delete data.photo_file; const submit = f.querySelector('[type=submit]'); submit.disabled = true; f.querySelector('.form-error').textContent = '';
   try {
     const name = f.dataset.form;
     if (name === 'register') { data.agree = data.agree === 'on'; await api('/register', 'POST', data); }
@@ -133,7 +141,9 @@ document.addEventListener('submit', async event => {
   } catch (error) { f.querySelector('.form-error').textContent = error.message; } finally { submit.disabled = false; }
 });
 async function initialize() {
-  try { const state = await api('/session'); me = state.user; csrf = state.csrf; await load(); }
+  try { const state = await api('/session'); me = state.user; csrf = state.csrf;
+    if (me) unread = await api('/unread');
+    await load(); }
   catch (error) { $('#app').innerHTML = `<main class="landing">${empty('The village is taking a moment.', error.message)}</main>`; }
 }
 window.addEventListener('hashchange', () => { close(); load(); });

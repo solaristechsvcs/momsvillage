@@ -25,9 +25,10 @@ test('MySQL-backed community workflows and access controls', { skip: process.env
     function client() {
       let cookie = '', csrf = '';
       return async (path, method = 'GET', body, status = 200, withCsrf = true) => {
-        const r = await fetch(base + '/api' + path, { method, headers: { cookie, 'Content-Type': 'application/json', ...(withCsrf ? { 'x-csrf-token': csrf } : {}) }, body: body ? JSON.stringify(body) : undefined });
+        const multipart = body instanceof FormData;
+        const r = await fetch(base + '/api' + path, { method, headers: { cookie, ...(!multipart ? { 'Content-Type': 'application/json' } : {}), ...(withCsrf ? { 'x-csrf-token': csrf } : {}) }, body: body ? (multipart ? body : JSON.stringify(body)) : undefined });
         const setCookie = r.headers.get('set-cookie'); if (setCookie) cookie = setCookie.split(';')[0];
-        const data = await r.json(); assert.equal(r.status, status, `${method} ${path}: ${JSON.stringify(data)}`);
+        const data = r.headers.get('content-type')?.startsWith('application/json') ? await r.json() : { bytes: Buffer.from(await r.arrayBuffer()), type: r.headers.get('content-type') }; assert.equal(r.status, status, `${method} ${path}: ${JSON.stringify(data)}`);
         if (data.csrf) csrf = data.csrf; return data;
       };
     }
@@ -69,6 +70,83 @@ test('MySQL-backed community workflows and access controls', { skip: process.env
     await admin(`/admin/users/${userB.id}`, 'PATCH', { banned: true }); await b('/posts', 'GET', undefined, 403);
     await admin(`/admin/users/${userB.id}`, 'PATCH', { banned: false }); await b('/posts');
     await a('/logout', 'POST'); await a('/session'); await a('/login', 'POST', { email: 'a@example.com', password: 'a-long-password-123' }); assert.equal((await a('/session')).user.id, userA.id);
+
+    // Friend requests cannot be self-accepted or sent through a block.
+    const c = client(); await c('/session');
+    await c('/register', 'POST', { name: 'Mom C', email: 'c@example.com', password: 'a-long-password-123', agree: true }, 201);
+    const userC = (await c('/session')).user;
+    assert.ok((await a('/members?q=Austin')).some(u => u.id === userA.id) === false);
+    await a(`/messages/${userB.id}`, 'POST', { body: 'Before friendship' }, 403);
+    await a(`/friends/${userA.id}`, 'POST', {}, 400);
+    await a(`/friends/${userB.id}`, 'POST', {}, 201);
+    await b(`/friends/${userA.id}`, 'POST', {}, 409);
+    await a(`/friends/${userB.id}`, 'PATCH', {}, 403);
+    assert.equal((await b('/friends')).friends[0].status, 'pending');
+    assert.ok((await b('/notifications')).some(n => n.kind === 'friend_request'));
+    await b(`/friends/${userA.id}`, 'PATCH', {});
+    assert.equal((await a('/friends')).friends[0].status, 'accepted');
+    const firstMessage = await a(`/messages/${userB.id}`, 'POST', { body: 'A private hello' }, 201);
+    assert.equal((await b('/unread')).messages, 1);
+    assert.equal((await b('/messages'))[0].body, 'A private hello');
+    const history = await b(`/messages/${userA.id}`);
+    assert.equal(history.messages[0].body, 'A private hello');
+    assert.equal(history.can_send, true);
+    assert.equal((await b('/unread')).messages, 0);
+    assert.equal((await c(`/messages/${userA.id}`)).messages.length, 0);
+    assert.equal((await admin(`/messages/${userA.id}`)).messages.length, 0);
+    await c('/reports', 'POST', { type: 'message', id: firstMessage.id, reason: 'Not my message' }, 404);
+    await b('/reports', 'POST', { type: 'message', id: firstMessage.id, reason: 'Review this individual message' }, 201);
+    const messageReport = (await admin('/admin')).reports[0];
+    assert.equal((await admin(`/admin/reports/${messageReport.id}/content`)).body, 'A private hello');
+    await b(`/blocks/${userA.id}`, 'POST', {});
+    assert.equal((await a('/friends')).friends.length, 0);
+    await a(`/messages/${userB.id}`, 'POST', { body: 'Blocked message' }, 403);
+    await a(`/friends/${userB.id}`, 'POST', {}, 403);
+    assert.equal((await a('/members?q=Mom%20B')).length, 0);
+    assert.equal((await b(`/messages/${userA.id}`)).can_send, false);
+    await b(`/blocks/${userA.id}`, 'DELETE');
+    await a(`/messages/${userB.id}`, 'POST', { body: 'Unfriended' }, 403);
+    await a(`/friends/${userB.id}`, 'POST', {}, 201); await b(`/friends/${userA.id}`, 'PATCH', {});
+    // Repeated likes do not duplicate notifications. Comments notify the post author.
+    const newPost = await a('/posts', 'POST', { body: 'Notify me', image: '' }, 201);
+    await b(`/posts/${newPost.id}/like`, 'POST', { active: true }); await b(`/posts/${newPost.id}/like`, 'POST', { active: true });
+    await b(`/posts/${newPost.id}/comments`, 'POST', { body: 'Hello again' }, 201);
+    const alerts = await a('/notifications');
+    assert.equal(alerts.filter(n => n.kind === 'like' && n.target_id === newPost.id).length, 1);
+    assert.ok(alerts.some(n => n.kind === 'comment' && n.target_id === newPost.id));
+    const privateAlert = alerts.find(n => !n.read_at);
+    await c(`/notifications/${privateAlert.id}`, 'PATCH', {});
+    assert.ok((await a('/notifications')).find(n => n.id === privateAlert.id).read_at === null);
+    await a('/notifications/read', 'POST', { through_id: Math.max(...alerts.map(n => n.id)) });
+    assert.equal((await a('/unread')).notifications, 0);
+    await admin(`/content/message/${firstMessage.id}`, 'DELETE');
+    assert.equal((await b(`/messages/${userA.id}`)).messages.length, 0);
+    const unreported = await a(`/messages/${userB.id}`, 'POST', { body: 'Unreported private message' }, 201);
+    await admin(`/content/message/${unreported.id}`, 'DELETE', undefined, 403);
+    // Images require a session, real image bytes, ownership on attachment, and safe deletion.
+    const sharp = (await import('sharp')).default;
+    const photo = await sharp({ create: { width: 40, height: 40, channels: 3, background: '#779966' } }).withMetadata({ exif: { IFD0: { Artist: 'Remove this metadata' } } }).jpeg().toBuffer();
+    const multipart = bytes => { const f = new FormData(); f.append('image', new Blob([bytes], { type: 'image/jpeg' }), 'photo.jpg'); return f; };
+    await guest('/session'); await guest('/uploads', 'POST', multipart(photo), 401);
+    await a('/uploads', 'POST', multipart(Buffer.from('<svg><script>alert(1)</script></svg>')), 400);
+    await a('/uploads', 'POST', multipart(Buffer.alloc(8 * 1024 * 1024 + 1)), 400);
+    const uploaded = await a('/uploads', 'POST', multipart(photo), 201);
+    assert.match(uploaded.url, /^\/api\/media\/[a-f0-9]{32}\.webp$/);
+    const mediaPath = uploaded.url.slice(4);
+    const saved = await a(mediaPath); assert.match(saved.type, /^image\/webp/);
+    assert.equal((await sharp(saved.bytes).metadata()).exif, undefined);
+    await guest(mediaPath, 'GET', undefined, 401);
+    await a('/profile', 'PATCH', { name: 'Mom A', city: 'Austin', bio: 'Photo test', avatar: uploaded.url });
+    const filename = uploaded.url.split('/').pop();
+    await b(`/uploads/${filename}`, 'DELETE', undefined, 404);
+    await b('/posts', 'POST', { body: 'Stolen upload reference', image: uploaded.url }, 400);
+    await a(`/uploads/${filename}`, 'DELETE', undefined, 409);
+    await a('/profile', 'PATCH', { name: 'Mom A', city: 'Austin', bio: 'Photo removed', avatar: '' });
+    await a(`/uploads/${filename}`, 'DELETE'); await a(mediaPath, 'GET', undefined, 404);
+    assert.equal((await a('/uploads')).length, 0);
+    await admin(`/admin/users/${userB.id}`, 'PATCH', { banned: true });
+    await a(`/messages/${userB.id}`, 'POST', { body: 'Suspended target' }, 404);
+    await admin(`/admin/users/${userB.id}`, 'PATCH', { banned: false });
   } finally {
     child.kill('SIGTERM');
     await Promise.race([new Promise(resolve => child.once('exit', resolve)), delay(3000)]);
