@@ -11,6 +11,7 @@ import { fileURLToPath } from 'node:url';
 import { text, id, price } from './validation.js';
 import { socialRouter } from './social.js';
 import { changeMemberAccess, initializeAdminRoles } from './admin.js';
+import { badgeColumns } from './badges.js';
 const { version } = JSON.parse(await readFile(new URL('./package.json', import.meta.url), 'utf8'));
 
 let config;
@@ -37,18 +38,18 @@ app.use('/api', rateLimit({ windowMs: 60000, limit: 180, standardHeaders: 'draft
 app.use('/api', (req, res, next) => { res.set('Cache-Control', 'no-store'); next(); });
 const adminEmail = email => (config.adminEmails ?? []).map(e => e.toLowerCase()).includes(email.toLowerCase());
 const isAdmin = user => !!user.is_admin;
-const publicUser = user => ({ id: user.id, name: user.name, city: user.city, bio: user.bio, avatar: user.avatar, created_at: user.created_at });
+const publicUser = user => ({ id: user.id, name: user.name, city: user.city, bio: user.bio, avatar: user.avatar, created_at: user.created_at, staff_badge: !!user.is_admin, developer_badge: !!user.developer_badge });
 const fail = (status, message) => { throw Object.assign(new Error(message), { status }); };
 const requireUser = async (req, res, next) => {
   if (!req.session.userId) return res.status(401).json({ error: 'Please sign in.' });
-  const [user] = await query('SELECT * FROM users WHERE id=?', [req.session.userId]);
+  const [user] = await query(`SELECT u.*,${badgeColumns()} FROM users u WHERE u.id=?`, [req.session.userId]);
   if (!user || user.banned) return res.status(403).json({ error: 'This account is unavailable.' });
   req.user = user; req.isAdmin = isAdmin(user); next();
 };
 const requireAdmin = (req, res, next) => req.isAdmin ? next() : res.status(403).json({ error: 'Administrator access required.' });
 app.get('/api/session', async (req, res) => {
   req.session.csrf ??= randomBytes(32).toString('hex');
-  const [user] = req.session.userId ? await query('SELECT * FROM users WHERE id=?', [req.session.userId]) : [];
+  const [user] = req.session.userId ? await query(`SELECT u.*,${badgeColumns()} FROM users u WHERE u.id=?`, [req.session.userId]) : [];
   res.json({ csrf: req.session.csrf, user: user && !user.banned ? { ...publicUser(user), email: user.email, admin: isAdmin(user) } : null });
 });
 app.use('/api', (req, res, next) => {
@@ -93,13 +94,13 @@ app.patch('/api/profile', async (req, res) => {
   res.json({ ok: true });
 });
 app.get('/api/members/:id', async (req, res) => {
-  const [user] = await query('SELECT id,name,city,bio,avatar,created_at FROM users WHERE id=? AND banned=FALSE', [id(req.params.id)]);
+  const [user] = await query(`SELECT u.id,u.name,u.city,u.bio,u.avatar,u.created_at,${badgeColumns()} FROM users u WHERE u.id=? AND u.banned=FALSE`, [id(req.params.id)]);
   if (!user) fail(404, 'Member not found.'); res.json(user);
 });
 app.get('/api/posts', async (req, res) => {
   const groupId = req.query.group ? id(req.query.group) : null;
   const postId = req.query.post ? id(req.query.post) : null;
-  const posts = await query(`SELECT p.*,u.name,u.avatar,
+  const posts = await query(`SELECT p.*,u.name,u.avatar,${badgeColumns()},
     (SELECT COUNT(*) FROM likes WHERE post_id=p.id) AS like_count,
     EXISTS(SELECT 1 FROM likes WHERE post_id=p.id AND user_id=?) AS liked,
     (SELECT COUNT(*) FROM comments WHERE post_id=p.id) AS comment_count,
@@ -128,7 +129,7 @@ app.post('/api/posts/:id/like', async (req, res) => {
 });
 app.get('/api/posts/:id/comments', async (req, res) => {
   await existing('posts', req.params.id);
-  res.json(await query('SELECT c.*,u.name,u.avatar FROM comments c JOIN users u ON u.id=c.user_id WHERE c.post_id=? AND u.banned=FALSE ORDER BY c.id LIMIT 100', [id(req.params.id)]));
+  res.json(await query(`SELECT c.*,u.name,u.avatar,${badgeColumns()} FROM comments c JOIN users u ON u.id=c.user_id WHERE c.post_id=? AND u.banned=FALSE ORDER BY c.id LIMIT 100`, [id(req.params.id)]));
 });
 app.post('/api/posts/:id/comments', async (req, res) => {
   const post = await existing('posts', req.params.id);
@@ -152,7 +153,7 @@ app.post('/api/groups/:id/join', async (req, res) => {
   else { if (group.owner_id === req.user.id) fail(400, 'Group owners must keep their membership.'); await query('DELETE FROM memberships WHERE group_id=? AND user_id=?', [group.id, req.user.id]); }
   res.json({ ok: true });
 });
-app.get('/api/events', async (req, res) => res.json(await query(`SELECT e.*,u.name,(SELECT COUNT(*) FROM rsvps WHERE event_id=e.id) AS attendees,
+app.get('/api/events', async (req, res) => res.json(await query(`SELECT e.*,u.name,${badgeColumns()},(SELECT COUNT(*) FROM rsvps WHERE event_id=e.id) AS attendees,
   EXISTS(SELECT 1 FROM rsvps WHERE event_id=e.id AND user_id=?) AS going FROM events e JOIN users u ON u.id=e.user_id WHERE u.banned=FALSE AND e.starts_at>=UTC_TIMESTAMP() ORDER BY e.starts_at LIMIT 100`, [req.user.id])));
 app.post('/api/events', async (req, res) => {
   const starts = new Date(req.body.starts_at);
@@ -167,7 +168,7 @@ app.post('/api/events/:id/rsvp', async (req, res) => {
   else await query('DELETE FROM rsvps WHERE event_id=? AND user_id=?', [event.id, req.user.id]);
   res.json({ ok: true });
 });
-app.get('/api/listings', async (req, res) => res.json(await query('SELECT l.*,u.name FROM listings l JOIN users u ON u.id=l.user_id WHERE u.banned=FALSE ORDER BY l.sold,l.id DESC LIMIT 100')));
+app.get('/api/listings', async (req, res) => res.json(await query(`SELECT l.*,u.name,${badgeColumns()} FROM listings l JOIN users u ON u.id=l.user_id WHERE u.banned=FALSE ORDER BY l.sold,l.id DESC LIMIT 100`)));
 app.post('/api/listings', async (req, res) => {
   await social.withImage(req.user.id, req.body.image, (execute, url) => execute('INSERT INTO listings(user_id,title,description,price,city,image,contact) VALUES(?,?,?,?,?,?,?)', [req.user.id, text(req.body.title, 140), text(req.body.description, 3000), price(req.body.price), text(req.body.city, 120), url, text(req.body.contact, 250)]));
   res.status(201).json({ ok: true });
@@ -201,17 +202,24 @@ app.post('/api/reports', async (req, res) => {
 });
 app.get('/api/admin', requireAdmin, async (req, res) => {
   const term = text(req.query.q ?? '', 100, false);
-  const users = await query('SELECT id,name,email,city,avatar,banned,is_admin,created_at FROM users WHERE name LIKE ? OR email LIKE ? ORDER BY id DESC LIMIT 200', [`%${term}%`, `%${term}%`]);
+  const users = await query(`SELECT u.id,u.name,u.email,u.city,u.avatar,u.banned,u.is_admin,u.created_at,${badgeColumns()} FROM users u WHERE u.name LIKE ? OR u.email LIKE ? ORDER BY u.id DESC LIMIT 200`, [`%${term}%`, `%${term}%`]);
   const reports = await query('SELECT r.*,u.name FROM reports r JOIN users u ON u.id=r.user_id WHERE resolved=FALSE ORDER BY r.id DESC LIMIT 200');
   res.json({ users, reports });
 });
 app.get('/api/admin/users/:id/profile', requireAdmin, async (req, res) => {
   const user = await existing('users', req.params.id);
+  const [badges] = await query(`SELECT ${badgeColumns()} FROM users u WHERE u.id=?`, [user.id]);
+  user.developer_badge = badges.developer_badge;
   res.json({ ...publicUser(user), email: user.email, is_admin: !!user.is_admin, banned: !!user.banned });
 });
 app.patch('/api/admin/users/:id/role', requireAdmin, async (req, res) => {
   if (typeof req.body.is_admin !== 'boolean') fail(400, 'Specify administrator access as true or false.');
   await changeMemberAccess(db, config.mysql.database, req.user.id, id(req.params.id), 'role', req.body.is_admin);
+  res.json({ ok: true });
+});
+app.patch('/api/admin/users/:id/developer-badge', requireAdmin, async (req, res) => {
+  if (typeof req.body.enabled !== 'boolean') fail(400, 'Specify badge assignment as true or false.');
+  await changeMemberAccess(db, config.mysql.database, req.user.id, id(req.params.id), 'developer', req.body.enabled);
   res.json({ ok: true });
 });
 app.get('/api/admin/reports/:id/content', requireAdmin, async (req, res) => {

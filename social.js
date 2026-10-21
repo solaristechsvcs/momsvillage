@@ -6,6 +6,7 @@ import { mkdir, writeFile, unlink } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { randomBytes } from 'node:crypto';
 import { id, text, image } from './validation.js';
+import { badgeColumns } from './badges.js';
 
 export async function socialRouter({ db, query, config, fail }) {
   const router = Router();
@@ -16,7 +17,7 @@ export async function socialRouter({ db, query, config, fail }) {
   async function member(value, self) {
     const peerId = id(value);
     if (peerId === self) fail(400, 'Choose another member.');
-    const [peer] = await query('SELECT id,name,city,bio,avatar,created_at FROM users WHERE id=? AND banned=FALSE', [peerId]);
+    const [peer] = await query(`SELECT u.id,u.name,u.city,u.bio,u.avatar,u.created_at,${badgeColumns()} FROM users u WHERE u.id=? AND u.banned=FALSE`, [peerId]);
     if (!peer) fail(404, 'Member unavailable.'); return peer;
   }
   async function notify(recipient, actor, kind, target, execute = query) {
@@ -47,7 +48,7 @@ export async function socialRouter({ db, query, config, fail }) {
   }
   router.get('/members', async (req, res) => {
     const term = text(req.query.q ?? '', 100, false).replace(/[\\%_]/g, '\\$&');
-    res.json(await query(`SELECT u.id,u.name,u.city,u.bio,u.avatar,u.created_at,
+    res.json(await query(`SELECT u.id,u.name,u.city,u.bio,u.avatar,u.created_at,${badgeColumns()},
       f.status AS friendship_status,f.requester_id FROM users u
       LEFT JOIN friendships f ON f.user_low=LEAST(u.id,?) AND f.user_high=GREATEST(u.id,?)
       WHERE u.id<>? AND u.banned=FALSE AND (u.name LIKE ? OR u.city LIKE ?)
@@ -61,7 +62,7 @@ export async function socialRouter({ db, query, config, fail }) {
     res.json({ friendship: friend ?? null, blocked: !!ownBlock, contact_allowed: !await blocked(req.user.id, peer.id) });
   });
   router.get('/friends', async (req, res) => {
-    const friends = await query(`SELECT u.id,u.name,u.city,u.bio,u.avatar,u.created_at,f.status,f.requester_id
+    const friends = await query(`SELECT u.id,u.name,u.city,u.bio,u.avatar,u.created_at,${badgeColumns()},f.status,f.requester_id
       FROM friendships f JOIN users u ON u.id=IF(f.user_low=?,f.user_high,f.user_low)
       WHERE (f.user_low=? OR f.user_high=?) AND u.banned=FALSE
       AND NOT EXISTS(SELECT 1 FROM blocks b WHERE (b.user_id=? AND b.blocked_id=u.id) OR (b.blocked_id=? AND b.user_id=u.id))
@@ -120,7 +121,7 @@ export async function socialRouter({ db, query, config, fail }) {
     res.json({ ok: true });
   });
   router.get('/messages', async (req, res) => {
-    const threads = await query(`SELECT m.id,m.sender_id,m.recipient_id,m.body,m.created_at,u.id AS peer_id,u.name,u.avatar,
+    const threads = await query(`SELECT m.id,m.sender_id,m.recipient_id,m.body,m.created_at,u.id AS peer_id,u.name,u.avatar,${badgeColumns()},
       (SELECT COUNT(*) FROM messages x WHERE x.sender_id=u.id AND x.recipient_id=? AND x.read_at IS NULL) AS unread
       FROM messages m JOIN users u ON u.id=IF(m.sender_id=?,m.recipient_id,m.sender_id)
       JOIN (SELECT MAX(id) AS last_id FROM messages WHERE sender_id=? OR recipient_id=? GROUP BY IF(sender_id=?,recipient_id,sender_id)) t ON t.last_id=m.id
@@ -155,7 +156,7 @@ export async function socialRouter({ db, query, config, fail }) {
     res.status(201).json({ id: messageId });
   });
   router.get('/notifications', async (req, res) => {
-    const items = await query(`SELECT n.*,u.name,u.avatar FROM notifications n JOIN users u ON u.id=n.actor_id
+    const items = await query(`SELECT n.*,u.name,u.avatar,${badgeColumns()} FROM notifications n JOIN users u ON u.id=n.actor_id
       WHERE n.user_id=? AND u.banned=FALSE AND NOT EXISTS(SELECT 1 FROM blocks b WHERE (b.user_id=? AND b.blocked_id=n.actor_id) OR (b.user_id=n.actor_id AND b.blocked_id=?)) ORDER BY n.id DESC LIMIT 100`, [req.user.id, req.user.id, req.user.id]);
     res.json(items);
   });

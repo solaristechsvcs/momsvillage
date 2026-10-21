@@ -40,7 +40,7 @@ For Docker: `docker build -t momsvillage .`, then `docker run -d --name momsvill
 
 The new social navigation is visible after signing in; the public landing page stays similar. Check `/version` to identify the running application release. Version 0.2.1 adds versioned CSS/JavaScript URLs, disables browser/CDN caching of application assets at the origin, and prints the release in the startup log.
 
-After copying files, install dependencies and fully restart Wisp. The current log should say `Moms Village v0.3.0 listening on port ...`. If `/version` is missing or reports an older version, check the running container, application directory and Cloudflare Tunnel destination. If the origin is current but the public domain is stale, purge the site's Cloudflare cache and ensure custom cache rules respect origin headers or bypass caching for this app, particularly `/api/*` and `/version`. Origin headers cannot invalidate content that a proxy already cached or override a proxy configured to ignore them.
+After copying files, install dependencies and fully restart Wisp. The current log should say `Moms Village v0.3.1 listening on port ...`. If `/version` is missing or reports an older version, check the running container, application directory and Cloudflare Tunnel destination. If the origin is current but the public domain is stale, purge the site's Cloudflare cache and ensure custom cache rules respect origin headers or bypass caching for this app, particularly `/api/*` and `/version`. Origin headers cannot invalidate content that a proxy already cached or override a proxy configured to ignore them.
 
 ## Administrator roles (0.3)
 
@@ -49,6 +49,14 @@ In **Administration**, search members by name/email, click their name or **View 
 Roles are persisted in MySQL. On the first 0.3 startup, a one-time migration preserves the previously effective administrator list: old admin flags on accounts excluded from the previous `adminEmails` allowlist are cleared so revoked access is not unintentionally restored. Later startups leave dashboard-assigned roles intact. Both this marker and account administration audit records are stored in new tables created automatically. No manual SQL import or `config.js` changes are required.
 
 Administrative profile previews include role, suspension status, biography, city and account email, and work for suspended members. Regular profile endpoints continue to exclude private account email and suspended accounts. Account access changes are recorded in `admin_audit` with actor, target, action and timestamp.
+
+## Staff and Developer badges (0.3.1)
+
+Admins automatically display a **Staff** badge. In **Administration**, choose **Assign Developer badge** or **Remove Developer badge** for a member and confirm. Only active administrators can change this badge. Restore suspended accounts before assigning it; an existing badge may still be removed while an account is suspended. Assignments and removals are recorded in `admin_audit`.
+
+Developer is a display badge, not an administrator role. A Developer cannot manage members or badges unless separately assigned admin access. Both badges can appear together. Revoking admin access removes Staff automatically without removing Developer. Members cannot set badges through signup or profile editing.
+
+Badges appear on public/member profile previews, own profile, discussion authors/comments, member search, friend lists, message authors/inbox previews, notifications, event hosts, listing sellers and the admin page. Their values are read from the current database roles/assignments rather than stored on each post. Restart after updating; the new badge table is created automatically without a manual SQL import.
 
 ## Included
 

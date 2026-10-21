@@ -86,8 +86,8 @@ test('MySQL-backed community workflows and access controls', { skip: process.env
 
     // Friend requests cannot be self-accepted or sent through a block.
     const c = client(); await c('/session');
-    await c('/register', 'POST', { name: 'Mom C', email: 'c@example.com', password: 'a-long-password-123', agree: true }, 201);
-    const userC = (await c('/session')).user;
+    await c('/register', 'POST', { name: 'Mom C', email: 'c@example.com', password: 'a-long-password-123', agree: true, is_admin: true, staff_badge: true, developer_badge: true }, 201);
+    const userC = (await c('/session')).user; assert.equal(userC.admin, false); assert.equal(userC.staff_badge, false); assert.equal(userC.developer_badge, false);
     assert.ok((await a('/members?q=Austin')).some(u => u.id === userA.id) === false);
     await a(`/messages/${userB.id}`, 'POST', { body: 'Before friendship' }, 403);
     await a(`/friends/${userA.id}`, 'POST', {}, 400);
@@ -202,6 +202,35 @@ test('MySQL-backed community workflows and access controls', { skip: process.env
     await admin(`/admin/users/${userB.id}/role`, 'PATCH', { is_admin: false });
     await b('/admin', 'GET', undefined, 403);
     await admin(`/admin/users/${ownerId}/role`, 'PATCH', { is_admin: false }, 400);
+
+    // Staff badges follow actual admin roles; Developer is an independent, admin-managed badge.
+    assert.equal((await a(`/members/${ownerId}`)).staff_badge, 1);
+    assert.equal((await a(`/members/${userB.id}`)).staff_badge, 0);
+    await a(`/admin/users/${userB.id}/developer-badge`, 'PATCH', { enabled: true }, 403);
+    await b(`/admin/users/${userB.id}/developer-badge`, 'PATCH', { enabled: true }, 403);
+    await admin(`/admin/users/${userB.id}/developer-badge`, 'PATCH', { enabled: 'true' }, 400);
+    await admin(`/admin/users/${userB.id}/developer-badge`, 'PATCH', { enabled: true });
+    assert.equal((await b('/session')).user.developer_badge, true);
+    assert.equal((await b('/session')).user.admin, false);
+    await b('/admin', 'GET', undefined, 403);
+    const badgeProfile = await a(`/members/${userB.id}`);
+    assert.equal(badgeProfile.developer_badge, 1); assert.equal(badgeProfile.email, undefined);
+    await a('/profile', 'PATCH', { name: 'Mom A', city: 'Austin', bio: 'No badge spoofing', avatar: '', staff_badge: true, developer_badge: true, is_admin: true });
+    assert.equal((await a('/session')).user.staff_badge, false);
+    assert.equal((await a('/session')).user.developer_badge, false);
+    await b(`/posts/${newPost.id}/comments`, 'POST', { body: 'Developer comment' }, 201);
+    assert.equal((await a(`/posts/${newPost.id}/comments`)).find(c => c.body === 'Developer comment').developer_badge, 1);
+    const devPost = await b('/posts', 'POST', { body: 'Developer post', image: '' }, 201);
+    assert.equal((await a(`/posts?post=${devPost.id}`))[0].developer_badge, 1);
+    await admin(`/admin/users/${userB.id}/role`, 'PATCH', { is_admin: true });
+    const both = await a(`/members/${userB.id}`); assert.equal(both.staff_badge, 1); assert.equal(both.developer_badge, 1);
+    await admin(`/admin/users/${userB.id}/role`, 'PATCH', { is_admin: false });
+    const onlyDeveloper = await a(`/members/${userB.id}`); assert.equal(onlyDeveloper.staff_badge, 0); assert.equal(onlyDeveloper.developer_badge, 1);
+    await admin(`/admin/users/${userB.id}/developer-badge`, 'PATCH', { enabled: false });
+    assert.equal((await b('/session')).user.developer_badge, false);
+    await admin(`/admin/users/${userC.id}`, 'PATCH', { banned: true });
+    await admin(`/admin/users/${userC.id}/developer-badge`, 'PATCH', { enabled: true }, 400);
+    await admin(`/admin/users/${userC.id}`, 'PATCH', { banned: false });
   } finally {
     clearTimeout(watchdog);
     child.kill('SIGTERM');
