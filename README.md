@@ -40,7 +40,7 @@ For Docker: `docker build -t momsvillage .`, then `docker run -d --name momsvill
 
 The new social navigation is visible after signing in; the public landing page stays similar. Check `/version` to identify the running application release. Version 0.2.1 adds versioned CSS/JavaScript URLs, disables browser/CDN caching of application assets at the origin, and prints the release in the startup log.
 
-After copying files, install dependencies and fully restart Wisp. The current log should say `Moms Village v0.3.2 listening on port ...`. If `/version` is missing or reports an older version, check the running container, application directory and Cloudflare Tunnel destination. If the origin is current but the public domain is stale, purge the site's Cloudflare cache and ensure custom cache rules respect origin headers or bypass caching for this app, particularly `/api/*` and `/version`. Origin headers cannot invalidate content that a proxy already cached or override a proxy configured to ignore them.
+After copying files, install dependencies and fully restart Wisp. The current log should say `Moms Village v0.3.3 listening on port ...`. If `/version` is missing or reports an older version, check the running container, application directory and Cloudflare Tunnel destination. If the origin is current but the public domain is stale, purge the site's Cloudflare cache and ensure custom cache rules respect origin headers or bypass caching for this app, particularly `/api/*` and `/version`. Origin headers cannot invalidate content that a proxy already cached or override a proxy configured to ignore them.
 
 ## Administrator roles (0.3)
 
@@ -63,6 +63,10 @@ Badges appear on public/member profile previews, own profile, discussion authors
 Administrators can assign and remove **Founding Member** and **Tester** from each member's Administration row. Both badges are independent of Developer and Staff, appear in the same profile/name locations, and do not grant permissions. Gold identifies Founding Member; teal identifies Tester. Changes require confirmation and are audited.
 
 The first restart automatically converts the previous Developer-only badge column to expandable storage while preserving existing assignments. Your database user needs ALTER permission for this one-time upgrade. Fresh installs use the new schema directly. Keep your existing configuration; no manual SQL import is required.
+
+## Feed comment previews (0.3.3)
+
+Each feed/group post displays only its newest visible comment below the action buttons. The Comments button opens the conversation, with 100 recent comments per page and a View older comments control for earlier replies. Preview author names remain clickable, badges are shown, and adding a reply updates the feed preview/count. Deleted comments and comments by suspended authors are excluded from previews and counts. Existing data works without a migration.
 
 ## Included
 
@@ -89,7 +93,7 @@ Images can be uploaded directly or supplied as external HTTPS URLs. External hos
 
 No child profiles, exact-location tracking, payments, shipping, browser push notifications, email verification, password recovery or automated content moderation are included yet. Marketplace transactions are arranged outside the app. Add email verification/recovery and a production privacy policy before broad public onboarding.
 
-Lists are bounded to the latest 50 posts, 100 comments per post, 100 groups/events/listings, 100 directory results/notifications/inbox threads, and 200 friends/blocked members/staff records/upload-library entries. Conversations load 50 messages per page and support older messages. Other list pagination is future work. Content deletion is permanent and also removes dependent comments, memberships, likes or RSVPs. Messages have no member-side deletion; staff can remove reported messages.
+Lists are bounded to the latest 50 posts, 100 comments per conversation page, 100 groups/events/listings, 100 directory results/notifications/inbox threads, and 200 friends/blocked members/staff records/upload-library entries. Conversations load 50 messages per page and support older messages. Other list pagination is future work. Content deletion is permanent and also removes dependent comments, memberships, likes or RSVPs. Messages have no member-side deletion; staff can remove reported messages.
 
 ## Checks
 

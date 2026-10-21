@@ -14,6 +14,11 @@ test('social navigation, requests, conversations, notifications and photo forms'
   w.HTMLDialogElement.prototype.showModal = function () { this.setAttribute('open', ''); };
   w.HTMLDialogElement.prototype.close = function () { this.removeAttribute('open'); };
   const alerts = [{ id: 5, actor_id: 2, kind: 'comment', target_id: 10, name: peer.name, avatar: '', read_at: null, created_at: '2026-10-21T00:00:00Z' }];
+  const commentRows = [
+    { id: 1, post_id: 10, user_id: 2, name: 'Mom B', body: 'An older hidden comment', created_at: '2026-10-21T00:00:00Z' },
+    { id: 2, post_id: 10, user_id: 2, name: 'Mom B', body: '<script>Latest comment</script>', created_at: '2026-10-21T00:01:00Z', tester_badge: true }
+  ];
+  const feedPost = { id: 10, user_id: 1, name: 'Mom A', body: 'A village discussion', like_count: 0, comment_count: 2, latest_comment: commentRows[1], created_at: '2026-10-21T00:00:00Z' };
   w.fetch = async (url, opts = {}) => {
     calls.push([url, opts.method ?? 'GET', opts.body]);
     let result = { ok: true };
@@ -24,7 +29,13 @@ test('social navigation, requests, conversations, notifications and photo forms'
     else if (url === '/api/relationships/2') result = { friendship: null, blocked: false, contact_allowed: true };
     else if (url === '/api/messages/2' && opts.method === 'GET') result = { peer, can_send: true, has_more: false, messages: [{ id: 3, sender_id: 2, recipient_id: 1, body: '<img src=x onerror=bad()>', created_at: '2026-10-21T00:00:00Z' }] };
     else if (url === '/api/notifications') result = alerts;
-    else if (url.startsWith('/api/posts')) result = [];
+    else if (url === '/api/posts/10/comments') {
+      if (opts.method === 'POST') {
+        commentRows.push({ id: 3, post_id: 10, user_id: 1, name: 'Mom A', body: JSON.parse(opts.body).body, created_at: '2026-10-21T00:02:00Z' });
+        feedPost.latest_comment = commentRows[2]; feedPost.comment_count = 3;
+      } else result = commentRows;
+    }
+    else if (url.startsWith('/api/posts')) result = [feedPost];
     return { ok: true, json: async () => result };
   };
   const waitFor = async check => { for (let n = 0; n < 100; n++) { if (check()) return; await delay(10); } assert.fail('UI did not reach expected state: ' + w.document.body.textContent.slice(-1000)); };
@@ -56,6 +67,20 @@ test('social navigation, requests, conversations, notifications and photo forms'
     await go('profile'); await waitFor(() => w.document.querySelector('form[data-form="profile"]'));
     assert.ok(w.document.querySelector('input[data-upload-field="avatar"]'));
     assert.equal(w.document.querySelector('input[name="avatar"]').type, 'text');
+    await go('feed'); await waitFor(() => w.document.querySelector('.latest-comment'));
+    assert.equal(w.document.querySelectorAll('.latest-comment').length, 1);
+    assert.ok(w.document.querySelector('.latest-comment').textContent.includes('<script>Latest comment</script>'));
+    assert.equal(w.document.querySelector('.latest-comment script'), null);
+    assert.ok(w.document.querySelector('.latest-comment .member-badge.tester'));
+    assert.equal(w.document.querySelector('#main').textContent.includes('An older hidden comment'), false);
+    w.document.querySelector('[data-action="comments"][data-id="10"]').click();
+    await waitFor(() => w.document.querySelector('#modal-body .comment'));
+    assert.ok(w.document.querySelector('#modal-body').textContent.includes('An older hidden comment'));
+    const commentForm = w.document.querySelector('form[data-form="comment"]'); commentForm.elements.body.value = 'The new latest reply';
+    commentForm.dispatchEvent(new w.Event('submit', { bubbles: true, cancelable: true }));
+    await waitFor(() => w.document.querySelector('.latest-comment')?.textContent.includes('The new latest reply'));
+    assert.equal(w.document.querySelector('#main').textContent.includes('An older hidden comment'), false);
+
   } finally { nativeClose.call(w); }
 });
 

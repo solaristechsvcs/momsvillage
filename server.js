@@ -104,9 +104,19 @@ app.get('/api/posts', async (req, res) => {
   const posts = await query(`SELECT p.*,u.name,u.avatar,${badgeColumns()},
     (SELECT COUNT(*) FROM likes WHERE post_id=p.id) AS like_count,
     EXISTS(SELECT 1 FROM likes WHERE post_id=p.id AND user_id=?) AS liked,
-    (SELECT COUNT(*) FROM comments WHERE post_id=p.id) AS comment_count,
+    (SELECT COUNT(*) FROM comments cc JOIN users cu ON cu.id=cc.user_id WHERE cc.post_id=p.id AND cu.banned=FALSE) AS comment_count,
     g.name AS group_name FROM posts p JOIN users u ON u.id=p.user_id LEFT JOIN community_groups g ON g.id=p.group_id
     WHERE u.banned=FALSE ${postId ? 'AND p.id=?' : groupId ? 'AND p.group_id=?' : 'AND p.group_id IS NULL'} ORDER BY p.id DESC LIMIT 50`, postId ? [req.user.id, postId] : groupId ? [req.user.id, groupId] : [req.user.id]);
+  if (posts.length) {
+    const postIds = posts.map(post => post.id), placeholders = postIds.map(() => '?').join(',');
+    const latest = await query(`SELECT c.*,cu.name,cu.avatar,${badgeColumns('cu')} FROM comments c
+      JOIN users cu ON cu.id=c.user_id
+      JOIN (SELECT MAX(cc.id) AS latest_id FROM comments cc JOIN users author ON author.id=cc.user_id
+        WHERE cc.post_id IN (${placeholders}) AND author.banned=FALSE GROUP BY cc.post_id) newest ON newest.latest_id=c.id
+      WHERE cu.banned=FALSE`, postIds);
+    const previews = new Map(latest.map(comment => [comment.post_id, comment]));
+    for (const post of posts) post.latest_comment = previews.get(post.id) ?? null;
+  }
   res.json(posts);
 });
 app.post('/api/posts', async (req, res) => {
@@ -130,7 +140,9 @@ app.post('/api/posts/:id/like', async (req, res) => {
 });
 app.get('/api/posts/:id/comments', async (req, res) => {
   await existing('posts', req.params.id);
-  res.json(await query(`SELECT c.*,u.name,u.avatar,${badgeColumns()} FROM comments c JOIN users u ON u.id=c.user_id WHERE c.post_id=? AND u.banned=FALSE ORDER BY c.id LIMIT 100`, [id(req.params.id)]));
+  const before = req.query.before ? id(req.query.before) : null;
+  const comments = await query(`SELECT c.*,u.name,u.avatar,${badgeColumns()} FROM comments c JOIN users u ON u.id=c.user_id WHERE c.post_id=? AND u.banned=FALSE ${before ? 'AND c.id<?' : ''} ORDER BY c.id DESC LIMIT 100`, [id(req.params.id), ...(before ? [before] : [])]);
+  res.json(comments.reverse());
 });
 app.post('/api/posts/:id/comments', async (req, res) => {
   const post = await existing('posts', req.params.id);

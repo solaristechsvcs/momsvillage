@@ -35,7 +35,7 @@ function shell() {
 }
 const heading = (title, subtitle, action, button) => `<div class="page-heading"><div><h1>${esc(title)}</h1><p class="muted">${esc(subtitle)}</p></div>${action ? `<button data-action="${action}">${esc(button)}</button>` : ''}</div>`;
 function postCard(p) {
-  return `<article class="card"><div class="post-head"><button class="profile-link" data-action="member" data-id="${p.user_id}">${avatar(p)}</button><div><button class="profile-link" data-action="member" data-id="${p.user_id}"><strong>${esc(p.name)} ${memberBadges(p)}</strong></button><small>${esc(date(p.created_at))}${p.group_name ? ` · ${esc(p.group_name)}` : ' · Village conversation'}</small></div></div><p class="post-body">${esc(p.body)}</p>${p.image ? `<img class="post-image" loading="lazy" src="${esc(p.image)}" referrerpolicy="no-referrer" alt="Photo shared by ${esc(p.name)}">` : ''}<div class="post-actions"><button class="${p.liked ? 'active' : ''}" data-action="like" data-id="${p.id}" data-active="${!p.liked}">♡ ${p.like_count} ${p.like_count === 1 ? 'like' : 'likes'}</button><button data-action="comments" data-id="${p.id}">☏ ${p.comment_count} comments</button><span class="spacer"></span>${moderation('post', p)}</div></article>`;
+  return `<article class="card"><div class="post-head"><button class="profile-link" data-action="member" data-id="${p.user_id}">${avatar(p)}</button><div><button class="profile-link" data-action="member" data-id="${p.user_id}"><strong>${esc(p.name)} ${memberBadges(p)}</strong></button><small>${esc(date(p.created_at))}${p.group_name ? ` · ${esc(p.group_name)}` : ' · Village conversation'}</small></div></div><p class="post-body">${esc(p.body)}</p>${p.image ? `<img class="post-image" loading="lazy" src="${esc(p.image)}" referrerpolicy="no-referrer" alt="Photo shared by ${esc(p.name)}">` : ''}<div class="post-actions"><button class="${p.liked ? 'active' : ''}" data-action="like" data-id="${p.id}" data-active="${!p.liked}">♡ ${p.like_count} ${p.like_count === 1 ? 'like' : 'likes'}</button><button data-action="comments" data-id="${p.id}">☏ ${p.comment_count} comments</button><span class="spacer"></span>${moderation('post', p)}</div>${latestCommentPreview(p.latest_comment)}</article>`;
 }
 function composer() { return `<div class="card composer">${avatar(me)}<button data-action="post">What’s on your mind, ${esc(me.name.split(' ')[0])}?</button></div>`; }
 async function load() {
@@ -78,9 +78,9 @@ async function load() {
 }
 function groupCards(groups) { return groups.map(g => `<article class="card"><div class="tile-art">♧</div><span class="pill">${esc(g.city)}</span><h3><a href="#group/${g.id}">${esc(g.name)}</a></h3><p class="muted">${g.members} members · Open group</p><p>${esc(g.description)}</p><div class="buttons"><a href="#group/${g.id}"><button class="secondary">Visit group ↗</button></a><button data-action="join" data-id="${g.id}" data-active="${!g.joined}">${g.joined ? 'Joined · Leave' : 'Join group'}</button>${moderation('group', g)}</div></article>`).join('') || empty('Your people are out there.', 'Create a group for your area or try another search.'); }
 function listingCards(items) { return items.map(l => `<article class="card">${l.image ? `<img class="post-image" src="${esc(l.image)}" referrerpolicy="no-referrer" loading="lazy" alt="${esc(l.title)}">` : '<div class="tile-art peach">◇</div>'}<span class="pill">${l.sold ? 'SOLD' : esc(l.city)}</span><h3>${esc(l.title)}</h3><div class="price">${Number(l.price) === 0 ? 'Free' : new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(l.price)}</div><p>${esc(l.description)}</p><p class="muted">Listed by ${esc(l.name)} ${memberBadges(l)}</p><div class="buttons">${!l.sold ? `<button data-action="contact" data-id="${l.id}">Contact seller</button>` : ''}${owned(l) ? `<button class="secondary" data-action="sold" data-id="${l.id}" data-active="${!l.sold}">${l.sold ? 'Relist' : 'Mark sold'}</button>` : ''}${moderation('listing', l)}</div></article>`).join('') || empty('Little things, new beginnings.', 'List your first item or try another search.'); }
-async function comments(postId) {
-  const list = await api(`/posts/${postId}/comments`);
-  modal('Keep the conversation going', `<div>${list.map(c => `<article class="comment"><strong>${esc(c.name)} ${memberBadges(c)}</strong><p>${esc(c.body)}</p>${moderation('comment', c)}</article>`).join('') || '<p class="muted">Be the first to add a little support.</p>'}</div>${form('comment', `<input type="hidden" name="post_id" value="${postId}">${field('body', 'Your comment', { type: 'textarea', max: 2000 })}`, 'Add comment')}`);
+async function comments(postId, before = null) {
+  const list = await api(`/posts/${postId}/comments${before ? `?before=${encodeURIComponent(before)}` : ''}`);
+  modal('Keep the conversation going', `${list.length === 100 ? `<button class="secondary" data-action="older-comments" data-id="${postId}" data-before="${list[0].id}">View older comments</button>` : ''}${before ? `<button class="subtle" data-action="comments" data-id="${postId}">Back to newest comments</button>` : ''}<div>${list.map(c => `<article class="comment"><strong>${esc(c.name)} ${memberBadges(c)}</strong><p>${esc(c.body)}</p>${moderation('comment', c)}</article>`).join('') || '<p class="muted">Be the first to add a little support.</p>'}</div>${form('comment', `<input type="hidden" name="post_id" value="${postId}">${field('body', 'Your comment', { type: 'textarea', max: 2000 })}`, 'Add comment')}`);
 }
 document.addEventListener('input', event => {
   if (event.target.id !== 'search') return;
@@ -101,6 +101,7 @@ document.addEventListener('click', async event => {
     else if (action === 'new-group') modal('Bring your people together', form('group', field('name', 'Group name', { max: 100 }) + field('city', 'City or area', { value: me.city, max: 120 }) + field('description', 'What is your group about?', { type: 'textarea', max: 3000 }) + '<p class="hint">Open groups and discussions are visible to all signed-in members.</p>', 'Create group'));
     else if (action === 'new-event') modal('Make a little plan', form('event', field('title', 'Event name', { max: 140 }) + field('location', 'Public meeting place / area', { max: 200 }) + field('starts_at', 'Date and time (your local time)', { type: 'datetime-local' }) + field('description', 'The details', { type: 'textarea', max: 3000 }), 'Create event'));
     else if (action === 'new-listing') modal('Pass something lovely forward', form('listing', field('title', 'Item name', { max: 140 }) + field('price', 'Price in USD (0 for free)', { type: 'number' }) + field('city', 'City or area', { value: me.city, max: 120 }) + field('description', 'Description and condition', { type: 'textarea', max: 3000 }) + imageField('image', 'Item photo') + field('contact', 'How should buyers contact you?', { max: 250 }) + '<p class="hint">Contact instructions are shared with signed-in members. Choose a contact method you are comfortable sharing.</p>', 'Publish listing'));
+    else if (action === 'older-comments') await comments(id, button.dataset.before);
     else if (action === 'comments') await comments(id);
     else if (action === 'admin-profile') await adminProfileModal(id);
     else if (action === 'assignable-badge') {
@@ -169,7 +170,7 @@ document.addEventListener('submit', async event => {
       if (Number(data.id) === me.id && data.active !== 'true') history.replaceState(null, '', '#feed');
     }
     if (name === 'ban') await api(`/admin/users/${data.id}`, 'PATCH', { banned: data.active === 'true' });
-    if (name === 'comment') { await api(`/posts/${data.post_id}/comments`, 'POST', data); await comments(data.post_id); return; }
+    if (name === 'comment') { await api(`/posts/${data.post_id}/comments`, 'POST', data); await load(); await comments(data.post_id); return; }
     closeModal(); await initialize();
   } catch (error) { f.querySelector('.form-error').textContent = error.message; } finally { submit.disabled = false; }
 });
@@ -199,4 +200,9 @@ function memberBadges(user) {
 function extraBadgeLabel(badge) { return ({ founding_member: 'Founding Member', tester: 'Tester' })[badge] ?? 'Member'; }
 function extraBadgeControls(user) {
   return ['founding_member', 'tester'].map(badge => `<button class="secondary" data-action="assignable-badge" data-badge="${badge}" data-id="${user.id}" data-active="${!user[`${badge}_badge`]}" ${user.banned && !user[`${badge}_badge`] ? 'disabled title="Restore the account before assigning a badge"' : ''}>${user[`${badge}_badge`] ? 'Remove' : 'Assign'} ${extraBadgeLabel(badge)} badge</button>`).join('');
+}
+
+function latestCommentPreview(comment) {
+  if (!comment) return '';
+  return `<section class="latest-comment" aria-label="Newest comment"><span class="latest-comment-label">Newest comment</span><div class="latest-comment-row"><button class="profile-link" data-action="member" data-id="${comment.user_id}" aria-label="View ${esc(comment.name)} profile">${avatar(comment)}</button><div class="latest-comment-content"><button class="profile-link" data-action="member" data-id="${comment.user_id}"><strong>${esc(comment.name)}</strong></button> ${memberBadges(comment)}<p>${esc(comment.body)}</p><small>${esc(date(comment.created_at))}</small></div></div></section>`;
 }

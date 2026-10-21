@@ -256,6 +256,34 @@ test('MySQL-backed community workflows and access controls', { skip: process.env
     const stillTester = (await b('/session')).user; assert.equal(stillTester.founding_member_badge, false); assert.equal(stillTester.tester_badge, true);
     await admin(`/admin/users/${userB.id}/badges/tester`, 'PATCH', { enabled: false });
     assert.equal((await b('/session')).user.tester_badge, false);
+
+    // Feed previews contain exactly the newest visible comment and correct visible counts.
+    const previewPost = await a('/posts', 'POST', { body: 'Comment preview test', image: '' }, 201);
+    assert.equal((await a(`/posts?post=${previewPost.id}`))[0].latest_comment, null);
+    await b(`/posts/${previewPost.id}/comments`, 'POST', { body: 'Older comment' }, 201);
+    await c(`/posts/${previewPost.id}/comments`, 'POST', { body: 'Newest comment' }, 201);
+    let preview = (await a(`/posts?post=${previewPost.id}`))[0];
+    assert.equal(preview.latest_comment.body, 'Newest comment'); assert.equal(preview.comment_count, 2);
+    await admin(`/admin/users/${userC.id}`, 'PATCH', { banned: true });
+    preview = (await a(`/posts?post=${previewPost.id}`))[0];
+    assert.equal(preview.latest_comment.body, 'Older comment'); assert.equal(preview.comment_count, 1);
+    await admin(`/admin/users/${userC.id}`, 'PATCH', { banned: false });
+    const conversation = await a(`/posts/${previewPost.id}/comments`);
+    assert.deepEqual(conversation.map(c => c.body), ['Older comment', 'Newest comment']);
+    await c(`/content/comment/${conversation[1].id}`, 'DELETE');
+    assert.equal((await a(`/posts?post=${previewPost.id}`))[0].latest_comment.body, 'Older comment');
+    await b(`/content/comment/${conversation[0].id}`, 'DELETE');
+    preview = (await a(`/posts?post=${previewPost.id}`))[0];
+    assert.equal(preview.latest_comment, null); assert.equal(preview.comment_count, 0);
+    // Latest conversation page includes the newest comment; older pages remain accessible.
+    const commentDb = await mysql.createConnection({ host: '127.0.0.1', port: 3306, user: 'root', password: 'integration-only-password', database: 'momsvillage_test' });
+    try { await commentDb.query('INSERT INTO comments(post_id,user_id,body) VALUES ?', [Array.from({ length: 105 }, (_, i) => [previewPost.id, userA.id, `Page comment ${i}`])]); }
+    finally { await commentDb.end(); }
+    const latestPage = await a(`/posts/${previewPost.id}/comments`);
+    assert.equal(latestPage.length, 100); assert.equal(latestPage[0].body, 'Page comment 5'); assert.equal(latestPage[99].body, 'Page comment 104');
+    const olderPage = await a(`/posts/${previewPost.id}/comments?before=${latestPage[0].id}`);
+    assert.equal(olderPage.length, 5); assert.equal(olderPage[0].body, 'Page comment 0');
+    assert.equal((await a(`/posts?post=${previewPost.id}`))[0].latest_comment.body, 'Page comment 104');
   } finally {
     clearTimeout(watchdog);
     child.kill('SIGTERM');
