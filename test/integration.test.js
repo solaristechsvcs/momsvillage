@@ -11,6 +11,15 @@ test('MySQL-backed community workflows and access controls', { skip: process.env
   assert.equal(exists, false, 'Refusing to overwrite an existing config.js. Integration tests are for disposable CI databases only.');
   const code = randomBytes(32).toString('hex');
   await writeFile(configFile, `export default ${JSON.stringify({ host: '127.0.0.1', port: 3099, sessionSecret: randomBytes(48).toString('hex'), secureCookies: false, trustProxy: false, mysql: { host: '127.0.0.1', port: 3306, user: 'root', password: 'integration-only-password', database: 'momsvillage_test' }, adminEmails: ['admin@example.com'], adminRegistrationCode: code })}`, { flag: 'wx', mode: 0o600 });
+  // Seed an old admin flag whose email was removed from the previous allowlist.
+  const mysql = (await import('mysql2/promise')).default;
+  const seed = await mysql.createConnection({ host: '127.0.0.1', port: 3306, user: 'root', password: 'integration-only-password', database: 'momsvillage_test' });
+  try {
+    const oldSchema = await (await import('node:fs/promises')).readFile(new URL('../schema.sql', import.meta.url), 'utf8');
+    for (const statement of oldSchema.split(';').map(s => s.trim()).filter(Boolean)) await seed.query(statement);
+    const bcrypt = (await import('bcryptjs')).default;
+    await seed.execute('INSERT INTO users(name,email,password,is_admin,bio) VALUES(?,?,?,?,?)', ['Retired admin', 'retired@example.com', await bcrypt.hash('legacy-password-123', 4), true, 'Legacy account']);
+  } finally { await seed.end(); }
   const child = spawn(process.execPath, ['server.js'], { cwd: new URL('..', import.meta.url), stdio: ['ignore', 'pipe', 'pipe'] });
   let output = '';
   child.stdout.on('data', d => { output += d; console.log('[server]', String(d).trim()); });
@@ -151,6 +160,48 @@ test('MySQL-backed community workflows and access controls', { skip: process.env
     await admin(`/admin/users/${userB.id}`, 'PATCH', { banned: true });
     await a(`/messages/${userB.id}`, 'POST', { body: 'Suspended target' }, 404);
     await admin(`/admin/users/${userB.id}`, 'PATCH', { banned: false });
+
+    // Administrators can manage roles without editing the bootstrap email list.
+    const retired = client(); await retired('/session');
+    await retired('/login', 'POST', { email: 'retired@example.com', password: 'legacy-password-123' });
+    assert.equal((await retired('/session')).user.admin, false, 'Migration must not reactivate previously removed admins');
+    await a(`/admin/users/${userB.id}/role`, 'PATCH', { is_admin: true }, 403);
+    await admin(`/admin/users/${userB.id}/role`, 'PATCH', { is_admin: 'true' }, 400);
+    await admin(`/admin/users/${userB.id}/role`, 'PATCH', { is_admin: true });
+    assert.equal((await b('/session')).user.admin, true);
+    assert.ok((await b('/admin')).users.find(u => u.id === userB.id).is_admin);
+    await admin(`/admin/users/${userB.id}`, 'PATCH', { banned: true }, 400);
+    await b(`/admin/users/${userC.id}/role`, 'PATCH', { is_admin: true });
+    assert.equal((await c('/session')).user.admin, true);
+    await b(`/admin/users/${userC.id}/role`, 'PATCH', { is_admin: false });
+    await c('/admin', 'GET', undefined, 403);
+    const staffProfile = await admin(`/admin/users/${userB.id}/profile`);
+    assert.equal(staffProfile.email, 'b@example.com'); assert.equal(staffProfile.is_admin, true);
+    await a(`/admin/users/${userB.id}/profile`, 'GET', undefined, 403);
+    await admin(`/admin/users/${userC.id}`, 'PATCH', { banned: true });
+    assert.equal((await admin(`/admin/users/${userC.id}/profile`)).banned, true);
+    await admin(`/admin/users/${userC.id}/role`, 'PATCH', { is_admin: true }, 400);
+    await admin(`/admin/users/${userC.id}`, 'PATCH', { banned: false });
+    assert.equal((await admin('/admin?q=b%40example.com')).users.length, 1);
+    // Restart migration checks must preserve new admins absent from config.adminEmails.
+    const checkDb = mysql.createPool({ host: '127.0.0.1', port: 3306, user: 'root', password: 'integration-only-password', database: 'momsvillage_test' });
+    try {
+      await (await import('../admin.js')).initializeAdminRoles(checkDb, { mysql: { database: 'momsvillage_test' }, adminEmails: ['admin@example.com'] });
+      assert.equal((await b('/session')).user.admin, true);
+      const [[count]] = await checkDb.query("SELECT COUNT(*) AS total FROM admin_audit WHERE action='grant_admin'");
+      assert.ok(Number(count.total) >= 2);
+    } finally { await checkDb.end(); }
+    // Concurrent self-demotions must never remove both active administrators.
+    const ownerId = (await admin('/session')).user.id;
+    const demotions = await Promise.allSettled([
+      admin(`/admin/users/${ownerId}/role`, 'PATCH', { is_admin: false }),
+      b(`/admin/users/${userB.id}/role`, 'PATCH', { is_admin: false })
+    ]);
+    assert.equal(demotions.filter(r => r.status === 'fulfilled').length, 1);
+    if (!(await admin('/session')).user.admin) await b(`/admin/users/${ownerId}/role`, 'PATCH', { is_admin: true });
+    await admin(`/admin/users/${userB.id}/role`, 'PATCH', { is_admin: false });
+    await b('/admin', 'GET', undefined, 403);
+    await admin(`/admin/users/${ownerId}/role`, 'PATCH', { is_admin: false }, 400);
   } finally {
     clearTimeout(watchdog);
     child.kill('SIGTERM');

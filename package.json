@@ -1,12 +1,12 @@
 {
   "name": "momsvillage",
-  "version": "0.2.1",
+  "version": "0.3.0",
   "private": true,
   "type": "module",
   "scripts": {
     "start": "node server.js",
     "test": "node --test",
-    "check": "node --check server.js && node --check social.js && node --check public/app.js && node --check public/social-ui.js"
+    "check": "node --check server.js && node --check social.js && node --check public/app.js && node --check public/social-ui.js && node --check admin.js"
   },
   "engines": {
     "node": ">=22"

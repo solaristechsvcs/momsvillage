@@ -23,7 +23,7 @@ The new navigation includes **Find moms**, **Friends**, **Messages**, and **Noti
 2. Copy `config.example.js` to `config.js` and enter your external MySQL connection details. Do not commit `config.js`: it contains credentials.
 3. Generate a unique secret with `node -e "console.log(require('crypto').randomBytes(48).toString('hex'))"` and set `sessionSecret`. Do not reuse another project's secret.
 4. Set `publicUrl` to your domain for reference, `secureCookies: true` for HTTPS, and configure `trustProxy` to match your proxy setup (for example `1` for one trusted reverse proxy). `publicUrl` does not configure DNS or a proxy automatically.
-5. Set `adminEmails` to your own email and generate a separate random `adminRegistrationCode` of at least 32 characters. Register with that email and enter the code under **Administrator setup**. Allowlisted addresses are reserved and cannot register without the code. There is no default account or password. Clear the setup code after provisioning your admins. Removing an email from the allowlist immediately revokes its admin access. Existing regular accounts are not automatically promoted by changing the allowlist.
+5. Set `adminEmails` to your own email and generate a separate random `adminRegistrationCode` of at least 32 characters. Register with that email and enter the code under **Administrator setup**. Allowlisted addresses are reserved and cannot register without the code. There is no default account or password. Clear the setup code after provisioning your first admin. Assign or revoke other administrators through **Administration**. Existing accounts are not promoted or demoted by editing `adminEmails`; that list now only reserves bootstrap registration addresses.
 6. Run `npm install`, then `npm start`. Retain the generated `package-lock.json` for reproducible subsequent installs with `npm ci`.
 
 The app creates tables from `schema.sql`, `social-schema.sql`, and its session store at startup. Create the database itself first. Separate SQL imports are unnecessary. This upgrade only adds new tables; future alterations to existing columns will require migrations.
@@ -40,7 +40,15 @@ For Docker: `docker build -t momsvillage .`, then `docker run -d --name momsvill
 
 The new social navigation is visible after signing in; the public landing page stays similar. Check `/version` to identify the running application release. Version 0.2.1 adds versioned CSS/JavaScript URLs, disables browser/CDN caching of application assets at the origin, and prints the release in the startup log.
 
-After copying files, install dependencies and fully restart Wisp. The log should say `Moms Village v0.2.1 listening on port ...`. If `/version` is missing or reports an older version, check the running container, application directory and Cloudflare Tunnel destination. If the origin is current but the public domain is stale, purge the site's Cloudflare cache and ensure custom cache rules respect origin headers or bypass caching for this app, particularly `/api/*` and `/version`. Origin headers cannot invalidate content that a proxy already cached or override a proxy configured to ignore them.
+After copying files, install dependencies and fully restart Wisp. The current log should say `Moms Village v0.3.0 listening on port ...`. If `/version` is missing or reports an older version, check the running container, application directory and Cloudflare Tunnel destination. If the origin is current but the public domain is stale, purge the site's Cloudflare cache and ensure custom cache rules respect origin headers or bypass caching for this app, particularly `/api/*` and `/version`. Origin headers cannot invalidate content that a proxy already cached or override a proxy configured to ignore them.
+
+## Administrator roles (0.3)
+
+In **Administration**, search members by name/email, click their name or **View profile**, and select **Grant admin** or **Revoke admin**. Role changes require confirmation and take effect on the next request without sign-out. All administrators have the same full access, including assigning other administrators. Restore suspended accounts before granting access; revoke admin access before suspending an administrator. The last active administrator cannot be demoted, including during concurrent changes.
+
+Roles are persisted in MySQL. On the first 0.3 startup, a one-time migration preserves the previously effective administrator list: old admin flags on accounts excluded from the previous `adminEmails` allowlist are cleared so revoked access is not unintentionally restored. Later startups leave dashboard-assigned roles intact. Both this marker and account administration audit records are stored in new tables created automatically. No manual SQL import or `config.js` changes are required.
+
+Administrative profile previews include role, suspension status, biography, city and account email, and work for suspended members. Regular profile endpoints continue to exclude private account email and suspended accounts. Account access changes are recorded in `admin_audit` with actor, target, action and timestamp.
 
 ## Included
 

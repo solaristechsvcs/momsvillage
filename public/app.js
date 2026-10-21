@@ -66,8 +66,9 @@ async function load() {
     } else if (page === 'profile') {
       html = heading('Your little corner', 'Let your village get to know you.') + `<div class="card"><div class="profile-cover"></div>${avatar(me)}${form('profile', field('name', 'Display name', { value: me.name, max: 80 }) + field('city', 'City or area', { value: me.city, max: 120, required: false }) + field('bio', 'About you', { type: 'textarea', value: me.bio, max: 2000, required: false }) + imageField('avatar', 'Profile picture', me.avatar) + '<p class="hint">These details are visible to signed-in members. Your email stays private.</p><button type="button" class="secondary" data-action="image-library">My image library</button>', 'Save profile')}</div>`;
     } else if (page === 'admin' && me.admin) {
-      const data = await api('/admin'); records = data.reports;
-      html = heading('Care for the village', 'Review reports and manage community accounts.') + `<section class="card"><h2>Open reports</h2>${data.reports.map(r => `<div class="admin-row"><strong>${esc(r.target_type)} #${r.target_id}</strong><p>${esc(r.reason)}</p><small>Reported by ${esc(r.name)} · ${esc(date(r.created_at))}</small><div class="buttons"><button class="secondary" data-action="review" data-id="${r.id}">View content</button><button class="danger" data-action="delete" data-type="${esc(r.target_type)}" data-id="${r.target_id}">Remove content</button><button class="secondary" data-action="resolve" data-id="${r.id}">Resolve</button></div></div>`).join('') || '<p class="muted">No open reports.</p>'}</section><section class="card"><h2>Members</h2><p class="hint">Showing the newest 200 accounts.</p>${data.users.map(u => `<div class="admin-row"><strong>${esc(u.name)} ${u.banned ? '· Suspended' : ''}</strong><small>${esc(u.email)} · ${esc(u.city)}</small><button class="${u.banned ? 'secondary' : 'danger'}" data-action="ban" data-id="${u.id}" data-active="${!u.banned}">${u.banned ? 'Restore account' : 'Suspend account'}</button></div>`).join('')}</section>`;
+      const adminQuery = new URLSearchParams(route.split('?')[1]).get('q') ?? '';
+      const data = await api(`/admin?q=${encodeURIComponent(adminQuery)}`); records = data.reports;
+      html = heading('Care for the village', 'Review reports and manage community accounts.') + `<section class="card"><h2>Open reports</h2>${data.reports.map(r => `<div class="admin-row"><strong>${esc(r.target_type)} #${r.target_id}</strong><p>${esc(r.reason)}</p><small>Reported by ${esc(r.name)} · ${esc(date(r.created_at))}</small><div class="buttons"><button class="secondary" data-action="review" data-id="${r.id}">View content</button><button class="danger" data-action="delete" data-type="${esc(r.target_type)}" data-id="${r.target_id}">Remove content</button><button class="secondary" data-action="resolve" data-id="${r.id}">Resolve</button></div></div>`).join('') || '<p class="muted">No open reports.</p>'}</section><section class="card"><h2>Members</h2>${form('admin-search', field('q', 'Find a member by name or email', { value: adminQuery, max: 100, required: false }), 'Search members')}<p class="hint">Showing up to 200 matching accounts.</p>${data.users.map(adminMemberRow).join('')}</section>`;
     } else html = empty('This page is unavailable.', 'Choose a page from the navigation.');
     if (current === generation) {
       $('#main').innerHTML = html;
@@ -101,6 +102,10 @@ document.addEventListener('click', async event => {
     else if (action === 'new-event') modal('Make a little plan', form('event', field('title', 'Event name', { max: 140 }) + field('location', 'Public meeting place / area', { max: 200 }) + field('starts_at', 'Date and time (your local time)', { type: 'datetime-local' }) + field('description', 'The details', { type: 'textarea', max: 3000 }), 'Create event'));
     else if (action === 'new-listing') modal('Pass something lovely forward', form('listing', field('title', 'Item name', { max: 140 }) + field('price', 'Price in USD (0 for free)', { type: 'number' }) + field('city', 'City or area', { value: me.city, max: 120 }) + field('description', 'Description and condition', { type: 'textarea', max: 3000 }) + imageField('image', 'Item photo') + field('contact', 'How should buyers contact you?', { max: 250 }) + '<p class="hint">Contact instructions are shared with signed-in members. Choose a contact method you are comfortable sharing.</p>', 'Publish listing'));
     else if (action === 'comments') await comments(id);
+    else if (action === 'admin-profile') await adminProfileModal(id);
+    else if (action === 'admin-role') {
+      modal(active === 'true' ? 'Grant administrator access?' : 'Revoke administrator access?', form('admin-role', `<p>${active === 'true' ? 'This member will have full administrator access, including moderation and assigning other administrators.' : 'This member will lose administrator access immediately. The last active administrator cannot be removed.'}</p><input type="hidden" name="id" value="${id}"><input type="hidden" name="active" value="${active}">`, active === 'true' ? 'Grant admin access' : 'Revoke admin access'));
+    }
     else if (action === 'member') await memberModal(id);
     else if (action === 'contact') { const l = records.find(r => r.id === Number(id)); modal(`Contact ${l.name}`, `<p>${esc(l.title)}</p><p class="member-info">${esc(l.contact)}</p><p class="hint">Meet in a public place. Never share sensitive payment or personal information.</p>`); }
     else if (action === 'report') modal('Help care for the village', form('report', `<input type="hidden" name="type" value="${esc(type)}"><input type="hidden" name="id" value="${id}">${field('reason', 'What should the team know?', { type: 'textarea', max: 2000 })}`, 'Send report'));
@@ -123,6 +128,11 @@ document.addEventListener('click', async event => {
 });
 document.addEventListener('submit', async event => {
   const f = event.target.closest('form[data-form]'); if (!f) return; event.preventDefault();
+  if (f.dataset.form === 'admin-search') {
+    const hash = `admin?q=${encodeURIComponent(new FormData(f).get('q') ?? '')}`;
+    if (location.hash.slice(1) === hash) await load(); else location.hash = hash;
+    return;
+  }
   if (['member-search','message'].includes(f.dataset.form)) { await socialSubmit(f); return; }
   if (f.dataset.uploading) { notice('Wait for your photo upload to finish.'); return; }
   const data = Object.fromEntries(new FormData(f));
@@ -138,6 +148,11 @@ document.addEventListener('submit', async event => {
     if (name === 'listing') await api('/listings', 'POST', data);
     if (name === 'report') { await api('/reports', 'POST', data); notice('Report sent to the community team.'); }
     if (name === 'delete') await api(`/content/${data.type}/${data.id}`, 'DELETE');
+    if (name === 'admin-role') {
+      await api(`/admin/users/${data.id}/role`, 'PATCH', { is_admin: data.active === 'true' });
+      notice(data.active === 'true' ? 'Administrator access granted.' : 'Administrator access revoked.');
+      if (Number(data.id) === me.id && data.active !== 'true') history.replaceState(null, '', '#feed');
+    }
     if (name === 'ban') await api(`/admin/users/${data.id}`, 'PATCH', { banned: data.active === 'true' });
     if (name === 'comment') { await api(`/posts/${data.post_id}/comments`, 'POST', data); await comments(data.post_id); return; }
     closeModal(); await initialize();
@@ -151,3 +166,12 @@ async function initialize() {
 }
 window.addEventListener('hashchange', () => { closeModal(); load(); });
 initialize();
+
+function adminMemberRow(user) {
+  const admin = !!user.is_admin;
+  return `<div class="admin-row"><div class="post-head">${avatar(user)}<div><button class="profile-link" data-action="admin-profile" data-id="${user.id}"><strong>${esc(user.name)}${user.id === me.id ? ' (you)' : ''}</strong></button><span class="pill">${admin ? 'Administrator' : 'Member'}${user.banned ? ' / Suspended' : ''}</span></div></div><small>${esc(user.email)} / ${esc(user.city)}</small><div class="buttons"><button class="secondary" data-action="admin-profile" data-id="${user.id}">View profile</button><button class="${admin ? 'secondary' : ''}" data-action="admin-role" data-id="${user.id}" data-active="${!admin}" ${user.banned && !admin ? 'disabled title="Restore the account before granting access"' : ''}>${admin ? 'Revoke admin' : 'Grant admin'}</button>${!admin || user.banned ? `<button class="${user.banned ? 'secondary' : 'danger'}" data-action="ban" data-id="${user.id}" data-active="${!user.banned}">${user.banned ? 'Restore account' : 'Suspend account'}</button>` : ''}</div></div>`;
+}
+async function adminProfileModal(memberId) {
+  const user = await api(`/admin/users/${memberId}/profile`);
+  modal(user.name, `<div class="profile-cover"></div>${avatar(user)}<p><span class="pill">${user.is_admin ? 'Administrator' : 'Member'}${user.banned ? ' / Suspended' : ''}</span></p><p class="muted">${esc(user.email)}<br>${esc(user.city || 'No city shared')}</p><p class="member-info">${esc(user.bio || 'No biography shared yet.')}</p><small>Joined ${esc(new Date(user.created_at).toLocaleDateString())}</small>`);
+}

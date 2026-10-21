@@ -10,6 +10,7 @@ import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { text, id, price } from './validation.js';
 import { socialRouter } from './social.js';
+import { changeMemberAccess, initializeAdminRoles } from './admin.js';
 const { version } = JSON.parse(await readFile(new URL('./package.json', import.meta.url), 'utf8'));
 
 let config;
@@ -21,6 +22,7 @@ const schema = await readFile(new URL('./schema.sql', import.meta.url), 'utf8');
 for (const statement of schema.split(';').map(s => s.trim()).filter(Boolean)) await db.query(statement);
 const socialSchema = await readFile(new URL('./social-schema.sql', import.meta.url), 'utf8');
 for (const statement of socialSchema.split(';').map(s => s.trim()).filter(Boolean)) await db.query(statement);
+await initializeAdminRoles(db, config);
 const query = async (sql, args = []) => (await db.execute(sql, args))[0];
 const app = express();
 app.disable('x-powered-by');
@@ -34,7 +36,7 @@ app.use(session({ name: 'mv.sid', secret: config.sessionSecret, store: sessionSt
 app.use('/api', rateLimit({ windowMs: 60000, limit: 180, standardHeaders: 'draft-8', legacyHeaders: false }));
 app.use('/api', (req, res, next) => { res.set('Cache-Control', 'no-store'); next(); });
 const adminEmail = email => (config.adminEmails ?? []).map(e => e.toLowerCase()).includes(email.toLowerCase());
-const isAdmin = user => !!user.is_admin && adminEmail(user.email);
+const isAdmin = user => !!user.is_admin;
 const publicUser = user => ({ id: user.id, name: user.name, city: user.city, bio: user.bio, avatar: user.avatar, created_at: user.created_at });
 const fail = (status, message) => { throw Object.assign(new Error(message), { status }); };
 const requireUser = async (req, res, next) => {
@@ -198,9 +200,19 @@ app.post('/api/reports', async (req, res) => {
   res.status(201).json({ ok: true });
 });
 app.get('/api/admin', requireAdmin, async (req, res) => {
-  const users = await query('SELECT id,name,email,city,banned,created_at FROM users ORDER BY id DESC LIMIT 200');
+  const term = text(req.query.q ?? '', 100, false);
+  const users = await query('SELECT id,name,email,city,avatar,banned,is_admin,created_at FROM users WHERE name LIKE ? OR email LIKE ? ORDER BY id DESC LIMIT 200', [`%${term}%`, `%${term}%`]);
   const reports = await query('SELECT r.*,u.name FROM reports r JOIN users u ON u.id=r.user_id WHERE resolved=FALSE ORDER BY r.id DESC LIMIT 200');
   res.json({ users, reports });
+});
+app.get('/api/admin/users/:id/profile', requireAdmin, async (req, res) => {
+  const user = await existing('users', req.params.id);
+  res.json({ ...publicUser(user), email: user.email, is_admin: !!user.is_admin, banned: !!user.banned });
+});
+app.patch('/api/admin/users/:id/role', requireAdmin, async (req, res) => {
+  if (typeof req.body.is_admin !== 'boolean') fail(400, 'Specify administrator access as true or false.');
+  await changeMemberAccess(db, config.mysql.database, req.user.id, id(req.params.id), 'role', req.body.is_admin);
+  res.json({ ok: true });
 });
 app.get('/api/admin/reports/:id/content', requireAdmin, async (req, res) => {
   const report = await existing('reports', req.params.id);
@@ -212,9 +224,9 @@ app.get('/api/admin/reports/:id/content', requireAdmin, async (req, res) => {
   res.json(await existing(target[0], report.target_id));
 });
 app.patch('/api/admin/users/:id', requireAdmin, async (req, res) => {
-  const user = await existing('users', req.params.id);
-  if (adminEmail(user.email)) fail(400, 'Administrator accounts cannot be suspended here.');
-  await query('UPDATE users SET banned=? WHERE id=?', [req.body.banned === true, user.id]); res.json({ ok: true });
+  if (typeof req.body.banned !== 'boolean') fail(400, 'Specify account suspension as true or false.');
+  await changeMemberAccess(db, config.mysql.database, req.user.id, id(req.params.id), 'suspension', req.body.banned);
+  res.json({ ok: true });
 });
 app.patch('/api/admin/reports/:id', requireAdmin, async (req, res) => {
   await existing('reports', req.params.id); await query('UPDATE reports SET resolved=TRUE WHERE id=?', [id(req.params.id)]); res.json({ ok: true });

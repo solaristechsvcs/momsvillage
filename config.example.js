@@ -6,7 +6,7 @@ export default {
   secureCookies: false, // true when publicUrl uses HTTPS
   trustProxy: false, // 1 if behind one trusted reverse proxy (including Cloudflare Tunnel)
   mysql: { host: '127.0.0.1', port: 3306, user: 'momsvillage', password: '', database: 'momsvillage' },
-  // Allowlisted admin accounts also require the one-time setup code during registration.
+  // Reserved bootstrap admin emails. Manage existing accounts through Administration.
   adminEmails: ['owner@example.com'],
   adminRegistrationCode: '' // Generate a separate random secret of at least 32 characters.
 };
