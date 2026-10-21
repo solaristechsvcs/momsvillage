@@ -12,19 +12,23 @@ test('MySQL-backed community workflows and access controls', { skip: process.env
   const code = randomBytes(32).toString('hex');
   await writeFile(configFile, `export default ${JSON.stringify({ host: '127.0.0.1', port: 3099, sessionSecret: randomBytes(48).toString('hex'), secureCookies: false, trustProxy: false, mysql: { host: '127.0.0.1', port: 3306, user: 'root', password: 'integration-only-password', database: 'momsvillage_test' }, adminEmails: ['admin@example.com'], adminRegistrationCode: code })}`, { flag: 'wx', mode: 0o600 });
   const child = spawn(process.execPath, ['server.js'], { cwd: new URL('..', import.meta.url), stdio: ['ignore', 'pipe', 'pipe'] });
-  let output = ''; child.stdout.on('data', d => output += d); child.stderr.on('data', d => output += d);
+  let output = '';
+  child.stdout.on('data', d => { output += d; console.log('[server]', String(d).trim()); });
+  child.stderr.on('data', d => { output += d; console.log('[server error]', String(d).trim()); });
+  const watchdog = setTimeout(() => child.kill('SIGKILL'), 45000);
   const base = 'http://127.0.0.1:3099';
   try {
     let ready = false;
     for (let i = 0; i < 80; i++) {
       if (child.exitCode !== null) throw new Error(output);
-      try { ready = (await fetch(base + '/health')).ok; if (ready) break; } catch {}
+      try { ready = (await fetch(base + '/health', { signal: AbortSignal.timeout(1000) })).ok; if (ready) break; } catch {}
       await delay(250);
     }
     assert.ok(ready, output || 'Server did not start.');
     function client() {
       let cookie = '', csrf = '';
       return async (path, method = 'GET', body, status = 200, withCsrf = true) => {
+        console.log('[integration]', method, path);
         const multipart = body instanceof FormData;
         const r = await fetch(base + '/api' + path, { signal: AbortSignal.timeout(10000), method, headers: { cookie, ...(!multipart ? { 'Content-Type': 'application/json' } : {}), ...(withCsrf ? { 'x-csrf-token': csrf } : {}) }, body: body ? (multipart ? body : JSON.stringify(body)) : undefined }).catch(error => { throw new Error(`${method} ${path}: ${error.message}`); });
         const setCookie = r.headers.get('set-cookie'); if (setCookie) cookie = setCookie.split(';')[0];
@@ -148,6 +152,7 @@ test('MySQL-backed community workflows and access controls', { skip: process.env
     await a(`/messages/${userB.id}`, 'POST', { body: 'Suspended target' }, 404);
     await admin(`/admin/users/${userB.id}`, 'PATCH', { banned: false });
   } finally {
+    clearTimeout(watchdog);
     child.kill('SIGTERM');
     await Promise.race([new Promise(resolve => child.once('exit', resolve)), delay(3000)]);
     if (child.exitCode === null) child.kill('SIGKILL');
