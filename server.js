@@ -8,7 +8,7 @@ import { rateLimit } from 'express-rate-limit';
 import { randomBytes, timingSafeEqual } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
-import { text, id, image, price } from './validation.js';
+import { text, id, price } from './validation.js';
 import { socialRouter } from './social.js';
 
 let config;
@@ -83,7 +83,7 @@ app.post('/api/login', authLimit, async (req, res) => {
 });
 app.post('/api/logout', (req, res, next) => req.session.destroy(err => { if (err) return next(err); res.clearCookie('mv.sid'); res.json({ ok: true }); }));
 app.use('/api', requireUser);
-const social = await socialRouter({ db, query, config, fail, publicUser });
+const social = await socialRouter({ db, query, config, fail });
 app.use('/api', social.router);
 app.patch('/api/profile', async (req, res) => {
   await social.withImage(req.user.id, req.body.avatar, (execute, url) => execute('UPDATE users SET name=?,city=?,bio=?,avatar=? WHERE id=?', [text(req.body.name, 80), text(req.body.city, 120, false), text(req.body.bio, 2000, false), url, req.user.id]));

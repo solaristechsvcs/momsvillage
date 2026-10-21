@@ -70,7 +70,7 @@ async function handleSocialClick(button) {
       else location.hash = `post/${n.target_id}`;
       await refreshUnread(); return;
     }
-    close(); await refreshUnread(); await load();
+    closeModal(); await refreshUnread(); await load();
   } catch (error) { notice(error.message); }
   finally { button.disabled = false; }
 }

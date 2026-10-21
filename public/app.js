@@ -15,7 +15,7 @@ async function api(path, method = 'GET', data) {
 }
 function notice(message) { $('#notice').textContent = message; clearTimeout(notice.timer); notice.timer = setTimeout(() => { $('#notice').textContent = ''; }, 5000); }
 function modal(title, html) { $('#modal-body').innerHTML = `<h2>${esc(title)}</h2>${html}`; if (!$('#modal').open) $('#modal').showModal(); }
-function close() { $('#modal').close(); $('#modal-body').innerHTML = ''; }
+function closeModal() { $('#modal').close(); $('#modal-body').innerHTML = ''; }
 function field(name, label, options = {}) {
   const { value = '', type = 'text', max = 200, required = true } = options;
   return `<label for="f-${name}">${esc(label)}</label>${type === 'textarea' ? `<textarea id="f-${name}" name="${name}" maxlength="${max}" ${required ? 'required' : ''}>${esc(value)}</textarea>` : `<input id="f-${name}" name="${name}" type="${type}" value="${esc(value)}" maxlength="${max}" ${required ? 'required' : ''} ${type === 'number' ? 'min="0" max="999999.99" step="0.01"' : ''}>`}`;
@@ -69,7 +69,10 @@ async function load() {
       const data = await api('/admin'); records = data.reports;
       html = heading('Care for the village', 'Review reports and manage community accounts.') + `<section class="card"><h2>Open reports</h2>${data.reports.map(r => `<div class="admin-row"><strong>${esc(r.target_type)} #${r.target_id}</strong><p>${esc(r.reason)}</p><small>Reported by ${esc(r.name)} · ${esc(date(r.created_at))}</small><div class="buttons"><button class="secondary" data-action="review" data-id="${r.id}">View content</button><button class="danger" data-action="delete" data-type="${esc(r.target_type)}" data-id="${r.target_id}">Remove content</button><button class="secondary" data-action="resolve" data-id="${r.id}">Resolve</button></div></div>`).join('') || '<p class="muted">No open reports.</p>'}</section><section class="card"><h2>Members</h2><p class="hint">Showing the newest 200 accounts.</p>${data.users.map(u => `<div class="admin-row"><strong>${esc(u.name)} ${u.banned ? '· Suspended' : ''}</strong><small>${esc(u.email)} · ${esc(u.city)}</small><button class="${u.banned ? 'secondary' : 'danger'}" data-action="ban" data-id="${u.id}" data-active="${!u.banned}">${u.banned ? 'Restore account' : 'Suspend account'}</button></div>`).join('')}</section>`;
     } else html = empty('This page is unavailable.', 'Choose a page from the navigation.');
-    if (current === generation) $('#main').innerHTML = html;
+    if (current === generation) {
+      $('#main').innerHTML = html;
+      if (page === 'messages') await refreshUnread();
+    }
   } catch (error) { if (current === generation) $('#main').innerHTML = empty('We couldn’t load this page.', error.message); }
 }
 function groupCards(groups) { return groups.map(g => `<article class="card"><div class="tile-art">♧</div><span class="pill">${esc(g.city)}</span><h3><a href="#group/${g.id}">${esc(g.name)}</a></h3><p class="muted">${g.members} members · Open group</p><p>${esc(g.description)}</p><div class="buttons"><a href="#group/${g.id}"><button class="secondary">Visit group ↗</button></a><button data-action="join" data-id="${g.id}" data-active="${!g.joined}">${g.joined ? 'Joined · Leave' : 'Join group'}</button>${moderation('group', g)}</div></article>`).join('') || empty('Your people are out there.', 'Create a group for your area or try another search.'); }
@@ -89,7 +92,7 @@ document.addEventListener('click', async event => {
   event.preventDefault(); const { action, id, type, active } = button.dataset;
   if (socialActions.has(action)) { await handleSocialClick(button); return; }
   try {
-    if (action === 'close') close();
+    if (action === 'close') closeModal();
     else if (action === 'login' || action === 'register') auth(action === 'register');
     else if (action === 'guidelines') guidelines();
     else if (action === 'logout') { await api('/logout', 'POST'); me = null; await initialize(); }
@@ -137,7 +140,7 @@ document.addEventListener('submit', async event => {
     if (name === 'delete') await api(`/content/${data.type}/${data.id}`, 'DELETE');
     if (name === 'ban') await api(`/admin/users/${data.id}`, 'PATCH', { banned: data.active === 'true' });
     if (name === 'comment') { await api(`/posts/${data.post_id}/comments`, 'POST', data); await comments(data.post_id); return; }
-    close(); await initialize();
+    closeModal(); await initialize();
   } catch (error) { f.querySelector('.form-error').textContent = error.message; } finally { submit.disabled = false; }
 });
 async function initialize() {
@@ -146,5 +149,5 @@ async function initialize() {
     await load(); }
   catch (error) { $('#app').innerHTML = `<main class="landing">${empty('The village is taking a moment.', error.message)}</main>`; }
 }
-window.addEventListener('hashchange', () => { close(); load(); });
+window.addEventListener('hashchange', () => { closeModal(); load(); });
 initialize();

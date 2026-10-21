@@ -8,6 +8,7 @@ test('social navigation, requests, conversations, notifications and photo forms'
   const html = await readFile(new URL('../public/index.html', import.meta.url), 'utf8');
   const dom = new JSDOM(html, { url: 'https://example.com/#members?q=Austin', runScripts: 'outside-only', pretendToBeVisual: true });
   const w = dom.window, calls = [];
+  const nativeClose = w.close;
   const self = { id: 1, name: 'Mom A', city: 'Austin', bio: '', avatar: '', admin: false };
   const peer = { id: 2, name: 'Mom B', city: 'Austin', bio: '<script>bad()</script>', avatar: '' };
   w.HTMLDialogElement.prototype.showModal = function () { this.setAttribute('open', ''); };
@@ -30,6 +31,7 @@ test('social navigation, requests, conversations, notifications and photo forms'
   const go = async hash => { w.location.hash = hash; await delay(20); };
   try {
     w.eval((await readFile(new URL('../public/social-ui.js', import.meta.url), 'utf8')) + '\n' + (await readFile(new URL('../public/app.js', import.meta.url), 'utf8')));
+    assert.equal(w.close, nativeClose, 'Application helpers must preserve the browser window.close API.');
     await waitFor(() => w.document.querySelector('.member-card'));
     assert.ok(calls.some(c => c[0] === '/api/members?q=Austin'));
     assert.equal(w.document.querySelector('.member-card script'), null);
@@ -50,5 +52,5 @@ test('social navigation, requests, conversations, notifications and photo forms'
     await go('profile'); await waitFor(() => w.document.querySelector('form[data-form="profile"]'));
     assert.ok(w.document.querySelector('input[data-upload-field="avatar"]'));
     assert.equal(w.document.querySelector('input[name="avatar"]').type, 'text');
-  } finally { w.close(); }
+  } finally { nativeClose.call(w); }
 });

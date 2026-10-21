@@ -7,7 +7,7 @@ import { resolve } from 'node:path';
 import { randomBytes } from 'node:crypto';
 import { id, text, image } from './validation.js';
 
-export async function socialRouter({ db, query, config, fail, publicUser }) {
+export async function socialRouter({ db, query, config, fail }) {
   const router = Router();
   const uploadPath = resolve(config.uploadsDirectory ?? './uploads');
   await mkdir(uploadPath, { recursive: true });
