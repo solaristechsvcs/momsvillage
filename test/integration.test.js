@@ -10,7 +10,7 @@ test('MySQL-backed community workflows and access controls', { skip: process.env
   let exists = true; try { await access(configFile); } catch { exists = false; }
   assert.equal(exists, false, 'Refusing to overwrite an existing config.js. Integration tests are for disposable CI databases only.');
   const code = randomBytes(32).toString('hex');
-  await writeFile(configFile, `export default ${JSON.stringify({ host: '127.0.0.1', port: 3099, sessionSecret: randomBytes(48).toString('hex'), secureCookies: false, trustProxy: false, mysql: { host: '127.0.0.1', port: 3306, user: 'root', password: 'integration-only-password', database: 'momsvillage_test' }, adminEmails: ['admin@example.com'], adminRegistrationCode: code })}`, { flag: 'wx', mode: 0o600 });
+  await writeFile(configFile, `export default ${JSON.stringify({ host: '127.0.0.1', port: 3099, sessionSecret: randomBytes(48).toString('hex'), secureCookies: false, trustProxy: 1, mysql: { host: '127.0.0.1', port: 3306, user: 'root', password: 'integration-only-password', database: 'momsvillage_test' }, adminEmails: ['admin@example.com'], adminRegistrationCode: code })}`, { flag: 'wx', mode: 0o600 });
   // Seed an old admin flag whose email was removed from the previous allowlist.
   const mysql = (await import('mysql2/promise')).default;
   const seed = await mysql.createConnection({ host: '127.0.0.1', port: 3306, user: 'root', password: 'integration-only-password', database: 'momsvillage_test' });
@@ -19,6 +19,8 @@ test('MySQL-backed community workflows and access controls', { skip: process.env
     for (const statement of oldSchema.split(';').map(s => s.trim()).filter(Boolean)) await seed.query(statement);
     const bcrypt = (await import('bcryptjs')).default;
     await seed.execute('INSERT INTO users(name,email,password,is_admin,bio) VALUES(?,?,?,?,?)', ['Retired admin', 'retired@example.com', await bcrypt.hash('legacy-password-123', 4), true, 'Legacy account']);
+    await seed.query("CREATE TABLE user_badges(user_id INT UNSIGNED NOT NULL,badge ENUM('developer') NOT NULL,PRIMARY KEY(user_id,badge),FOREIGN KEY(user_id) REFERENCES users(id))");
+    await seed.query("INSERT INTO user_badges(user_id,badge) SELECT id,'developer' FROM users WHERE email='retired@example.com'");
   } finally { await seed.end(); }
   const child = spawn(process.execPath, ['server.js'], { cwd: new URL('..', import.meta.url), stdio: ['ignore', 'pipe', 'pipe'] });
   let output = '';
@@ -34,12 +36,14 @@ test('MySQL-backed community workflows and access controls', { skip: process.env
       await delay(250);
     }
     assert.ok(ready, output || 'Server did not start.');
+    let clientCounter = 1;
     function client() {
+      const proxyAddress = `192.0.2.${clientCounter++}`;
       let cookie = '', csrf = '';
       return async (path, method = 'GET', body, status = 200, withCsrf = true) => {
         console.log('[integration]', method, path);
         const multipart = body instanceof FormData;
-        const r = await fetch(base + '/api' + path, { signal: AbortSignal.timeout(10000), method, headers: { cookie, ...(!multipart ? { 'Content-Type': 'application/json' } : {}), ...(withCsrf ? { 'x-csrf-token': csrf } : {}) }, body: body ? (multipart ? body : JSON.stringify(body)) : undefined }).catch(error => { throw new Error(`${method} ${path}: ${error.message}`); });
+        const r = await fetch(base + '/api' + path, { signal: AbortSignal.timeout(10000), method, headers: { cookie, 'x-forwarded-for': proxyAddress, ...(!multipart ? { 'Content-Type': 'application/json' } : {}), ...(withCsrf ? { 'x-csrf-token': csrf } : {}) }, body: body ? (multipart ? body : JSON.stringify(body)) : undefined }).catch(error => { throw new Error(`${method} ${path}: ${error.message}`); });
         const setCookie = r.headers.get('set-cookie'); if (setCookie) cookie = setCookie.split(';')[0];
         const data = r.headers.get('content-type')?.startsWith('application/json') ? await r.json() : { bytes: Buffer.from(await r.arrayBuffer()), type: r.headers.get('content-type') }; assert.equal(r.status, status, `${method} ${path}: ${JSON.stringify(data)}`);
         if (data.csrf) csrf = data.csrf; return data;
@@ -231,6 +235,27 @@ test('MySQL-backed community workflows and access controls', { skip: process.env
     await admin(`/admin/users/${userC.id}`, 'PATCH', { banned: true });
     await admin(`/admin/users/${userC.id}/developer-badge`, 'PATCH', { enabled: true }, 400);
     await admin(`/admin/users/${userC.id}`, 'PATCH', { banned: false });
+
+    // The old ENUM storage must upgrade without removing existing Developer badges.
+    assert.equal((await retired('/session')).user.developer_badge, true);
+    for (const badge of ['founding_member', 'tester']) {
+      await a(`/admin/users/${userB.id}/badges/${badge}`, 'PATCH', { enabled: true }, 403);
+      await admin(`/admin/users/${userB.id}/badges/${badge}`, 'PATCH', { enabled: true });
+    }
+    await admin(`/admin/users/${userB.id}/badges/staff`, 'PATCH', { enabled: true }, 400);
+    await admin(`/admin/users/${userB.id}/badges/tester`, 'PATCH', { enabled: 'yes' }, 400);
+    const specialBadges = (await b('/session')).user;
+    assert.equal(specialBadges.founding_member_badge, true); assert.equal(specialBadges.tester_badge, true); assert.equal(specialBadges.admin, false);
+    await b('/admin', 'GET', undefined, 403);
+    const publicBadges = await a(`/members/${userB.id}`);
+    assert.equal(publicBadges.founding_member_badge, 1); assert.equal(publicBadges.tester_badge, 1);
+    assert.equal((await a(`/posts?post=${devPost.id}`))[0].tester_badge, 1);
+    await a('/profile', 'PATCH', { name: 'Mom A', city: 'Austin', bio: 'Badge permissions', avatar: '', founding_member_badge: true, tester_badge: true });
+    const noSpoof = (await a('/session')).user; assert.equal(noSpoof.founding_member_badge, false); assert.equal(noSpoof.tester_badge, false);
+    await admin(`/admin/users/${userB.id}/badges/founding_member`, 'PATCH', { enabled: false });
+    const stillTester = (await b('/session')).user; assert.equal(stillTester.founding_member_badge, false); assert.equal(stillTester.tester_badge, true);
+    await admin(`/admin/users/${userB.id}/badges/tester`, 'PATCH', { enabled: false });
+    assert.equal((await b('/session')).user.tester_badge, false);
   } finally {
     clearTimeout(watchdog);
     child.kill('SIGTERM');

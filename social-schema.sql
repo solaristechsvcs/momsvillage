@@ -33,6 +33,6 @@ CREATE TABLE IF NOT EXISTS app_migrations (
  name VARCHAR(100) PRIMARY KEY, applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 CREATE TABLE IF NOT EXISTS user_badges (
- user_id INT UNSIGNED NOT NULL, badge ENUM('developer') NOT NULL,
+ user_id INT UNSIGNED NOT NULL, badge VARCHAR(32) NOT NULL,
  PRIMARY KEY(user_id,badge), FOREIGN KEY(user_id) REFERENCES users(id)
 );

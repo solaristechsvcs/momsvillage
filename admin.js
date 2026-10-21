@@ -1,3 +1,5 @@
+import { assignableBadges } from './badges.js';
+
 // Preserve the effective admin access of installations upgrading from email allowlists.
 export async function initializeAdminRoles(db, config) {
   const connection = await db.getConnection(), lock = `mv-admin-${config.mysql.database}`.slice(0, 64);
@@ -52,13 +54,15 @@ export async function changeMemberAccess(db, database, actorId, targetId, action
       await connection.execute('UPDATE users SET banned=? WHERE id=?', [enabled, targetId]);
       changed = !!target.banned !== enabled;
       auditAction = enabled ? 'suspend' : 'restore';
-    } else if (action === 'developer') {
-      if (enabled && target.banned) reject(400, 'Restore this account before assigning a Developer badge.');
-      const [badges] = await connection.execute("SELECT 1 FROM user_badges WHERE user_id=? AND badge='developer'", [targetId]);
+    } else if (action === 'developer' || action.startsWith('badge:')) {
+      const badge = action === 'developer' ? 'developer' : action.slice(6);
+      if (!Object.hasOwn(assignableBadges, badge)) reject(400, 'Invalid badge.');
+      if (enabled && target.banned) reject(400, 'Restore this account before assigning a badge.');
+      const [badges] = await connection.execute('SELECT 1 FROM user_badges WHERE user_id=? AND badge=?', [targetId, badge]);
       changed = !!badges.length !== enabled;
-      if (enabled) await connection.execute("INSERT IGNORE INTO user_badges(user_id,badge) VALUES(?,'developer')", [targetId]);
-      else await connection.execute("DELETE FROM user_badges WHERE user_id=? AND badge='developer'", [targetId]);
-      auditAction = enabled ? 'grant_developer' : 'revoke_developer';
+      if (enabled) await connection.execute('INSERT IGNORE INTO user_badges(user_id,badge) VALUES(?,?)', [targetId, badge]);
+      else await connection.execute('DELETE FROM user_badges WHERE user_id=? AND badge=?', [targetId, badge]);
+      auditAction = `${enabled ? 'grant' : 'revoke'}_${badge}`;
     } else reject(400, 'Invalid account action.');
     if (changed) await connection.execute('INSERT INTO admin_audit(actor_id,target_id,action) VALUES(?,?,?)', [actorId, targetId, auditAction]);
     await connection.commit(); transaction = false;

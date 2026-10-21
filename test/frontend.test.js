@@ -10,7 +10,7 @@ test('social navigation, requests, conversations, notifications and photo forms'
   const w = dom.window, calls = [];
   const nativeClose = w.close;
   const self = { id: 1, name: 'Mom A', city: 'Austin', bio: '', avatar: '', admin: false };
-  const peer = { id: 2, name: 'Mom B', city: 'Austin', bio: '<script>bad()</script>', avatar: '', staff_badge: true, developer_badge: true };
+  const peer = { id: 2, name: 'Mom B', city: 'Austin', bio: '<script>bad()</script>', avatar: '', staff_badge: true, developer_badge: true, founding_member_badge: true, tester_badge: true };
   w.HTMLDialogElement.prototype.showModal = function () { this.setAttribute('open', ''); };
   w.HTMLDialogElement.prototype.close = function () { this.removeAttribute('open'); };
   const alerts = [{ id: 5, actor_id: 2, kind: 'comment', target_id: 10, name: peer.name, avatar: '', read_at: null, created_at: '2026-10-21T00:00:00Z' }];
@@ -37,6 +37,8 @@ test('social navigation, requests, conversations, notifications and photo forms'
     assert.equal(w.document.querySelector('.member-card script'), null);
     assert.equal(w.document.querySelectorAll('.member-card .member-badge.staff').length, 1);
     assert.equal(w.document.querySelectorAll('.member-card .member-badge.developer').length, 1);
+    assert.equal(w.document.querySelectorAll('.member-card .member-badge.founding-member').length, 1);
+    assert.equal(w.document.querySelectorAll('.member-card .member-badge.tester').length, 1);
     assert.ok(w.document.querySelector('.member-card').textContent.includes('<script>bad()</script>'));
     w.document.querySelector('[data-action="friend-send"]').click();
     await waitFor(() => calls.some(c => c[0] === '/api/friends/2' && c[1] === 'POST'));
@@ -73,6 +75,7 @@ test('admin member profiles and confirmed role changes', { skip: process.env.MV_
     else if (url.startsWith('/api/admin?q=')) result = { users, reports: [] };
     else if (url.endsWith('/2/role')) { users[1].is_admin = JSON.parse(opts.body).is_admin; users[1].staff_badge = users[1].is_admin; }
     else if (url.endsWith('/2/developer-badge')) users[1].developer_badge = JSON.parse(opts.body).enabled;
+    else if (url.includes('/2/badges/')) users[1][`${url.split('/').pop()}_badge`] = JSON.parse(opts.body).enabled;
     else if (url.endsWith('/3/profile')) result = users[2];
     return { ok: true, json: async () => result };
   };
@@ -96,6 +99,21 @@ test('admin member profiles and confirmed role changes', { skip: process.env.MV_
     badgeForm.dispatchEvent(new w.Event('submit', { bubbles: true, cancelable: true }));
     await waitFor(() => w.document.querySelector('[data-action="developer-badge"][data-id="2"][data-active="false"]'));
     assert.ok(w.document.querySelector('.admin-row .member-badge.developer'));
+    for (const [badge, label] of [['founding_member', 'Founding Member'], ['tester', 'Tester']]) {
+      assert.equal(w.document.querySelector(`[data-action="assignable-badge"][data-badge="${badge}"][data-id="3"]`).disabled, true);
+      w.document.querySelector(`[data-action="assignable-badge"][data-badge="${badge}"][data-id="2"]`).click();
+      const form = w.document.querySelector('form[data-form="assignable-badge"]');
+      assert.ok(form.textContent.includes(label));
+      form.dispatchEvent(new w.Event('submit', { bubbles: true, cancelable: true }));
+      await waitFor(() => w.document.querySelector(`[data-action="assignable-badge"][data-badge="${badge}"][data-id="2"][data-active="false"]`));
+    }
+    assert.ok(w.document.querySelector('.admin-row .member-badge.founding-member'));
+    assert.ok(w.document.querySelector('.admin-row .member-badge.tester'));
+    w.document.querySelector('[data-action="assignable-badge"][data-badge="founding_member"][data-id="2"]').click();
+    w.document.querySelector('form[data-form="assignable-badge"]').dispatchEvent(new w.Event('submit', { bubbles: true, cancelable: true }));
+    await waitFor(() => w.document.querySelector('[data-action="assignable-badge"][data-badge="founding_member"][data-id="2"][data-active="true"]'));
+    assert.equal(w.document.querySelector('.admin-row .member-badge.founding-member'), null);
+    assert.ok(w.document.querySelector('.admin-row .member-badge.tester'));
     w.document.querySelector('[data-action="admin-profile"][data-id="3"]').click();
     await waitFor(() => w.document.querySelector('#modal-body .member-info'));
     assert.ok(w.document.querySelector('#modal-body').textContent.includes('Suspended'));

@@ -11,7 +11,7 @@ import { fileURLToPath } from 'node:url';
 import { text, id, price } from './validation.js';
 import { socialRouter } from './social.js';
 import { changeMemberAccess, initializeAdminRoles } from './admin.js';
-import { badgeColumns } from './badges.js';
+import { badgeColumns, initializeBadgeStorage, assignableBadges } from './badges.js';
 const { version } = JSON.parse(await readFile(new URL('./package.json', import.meta.url), 'utf8'));
 
 let config;
@@ -23,6 +23,7 @@ const schema = await readFile(new URL('./schema.sql', import.meta.url), 'utf8');
 for (const statement of schema.split(';').map(s => s.trim()).filter(Boolean)) await db.query(statement);
 const socialSchema = await readFile(new URL('./social-schema.sql', import.meta.url), 'utf8');
 for (const statement of socialSchema.split(';').map(s => s.trim()).filter(Boolean)) await db.query(statement);
+await initializeBadgeStorage(db, config.mysql.database);
 await initializeAdminRoles(db, config);
 const query = async (sql, args = []) => (await db.execute(sql, args))[0];
 const app = express();
@@ -38,7 +39,7 @@ app.use('/api', rateLimit({ windowMs: 60000, limit: 180, standardHeaders: 'draft
 app.use('/api', (req, res, next) => { res.set('Cache-Control', 'no-store'); next(); });
 const adminEmail = email => (config.adminEmails ?? []).map(e => e.toLowerCase()).includes(email.toLowerCase());
 const isAdmin = user => !!user.is_admin;
-const publicUser = user => ({ id: user.id, name: user.name, city: user.city, bio: user.bio, avatar: user.avatar, created_at: user.created_at, staff_badge: !!user.is_admin, developer_badge: !!user.developer_badge });
+const publicUser = user => ({ id: user.id, name: user.name, city: user.city, bio: user.bio, avatar: user.avatar, created_at: user.created_at, staff_badge: !!user.is_admin, ...Object.fromEntries(Object.keys(assignableBadges).map(badge => [`${badge}_badge`, !!user[`${badge}_badge`]])) });
 const fail = (status, message) => { throw Object.assign(new Error(message), { status }); };
 const requireUser = async (req, res, next) => {
   if (!req.session.userId) return res.status(401).json({ error: 'Please sign in.' });
@@ -209,7 +210,7 @@ app.get('/api/admin', requireAdmin, async (req, res) => {
 app.get('/api/admin/users/:id/profile', requireAdmin, async (req, res) => {
   const user = await existing('users', req.params.id);
   const [badges] = await query(`SELECT ${badgeColumns()} FROM users u WHERE u.id=?`, [user.id]);
-  user.developer_badge = badges.developer_badge;
+  Object.assign(user, badges);
   res.json({ ...publicUser(user), email: user.email, is_admin: !!user.is_admin, banned: !!user.banned });
 });
 app.patch('/api/admin/users/:id/role', requireAdmin, async (req, res) => {
@@ -220,6 +221,12 @@ app.patch('/api/admin/users/:id/role', requireAdmin, async (req, res) => {
 app.patch('/api/admin/users/:id/developer-badge', requireAdmin, async (req, res) => {
   if (typeof req.body.enabled !== 'boolean') fail(400, 'Specify badge assignment as true or false.');
   await changeMemberAccess(db, config.mysql.database, req.user.id, id(req.params.id), 'developer', req.body.enabled);
+  res.json({ ok: true });
+});
+app.patch('/api/admin/users/:id/badges/:badge', requireAdmin, async (req, res) => {
+  if (!Object.hasOwn(assignableBadges, req.params.badge)) fail(400, 'Invalid badge.');
+  if (typeof req.body.enabled !== 'boolean') fail(400, 'Specify badge assignment as true or false.');
+  await changeMemberAccess(db, config.mysql.database, req.user.id, id(req.params.id), `badge:${req.params.badge}`, req.body.enabled);
   res.json({ ok: true });
 });
 app.get('/api/admin/reports/:id/content', requireAdmin, async (req, res) => {

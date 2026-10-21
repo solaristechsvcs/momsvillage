@@ -103,6 +103,10 @@ document.addEventListener('click', async event => {
     else if (action === 'new-listing') modal('Pass something lovely forward', form('listing', field('title', 'Item name', { max: 140 }) + field('price', 'Price in USD (0 for free)', { type: 'number' }) + field('city', 'City or area', { value: me.city, max: 120 }) + field('description', 'Description and condition', { type: 'textarea', max: 3000 }) + imageField('image', 'Item photo') + field('contact', 'How should buyers contact you?', { max: 250 }) + '<p class="hint">Contact instructions are shared with signed-in members. Choose a contact method you are comfortable sharing.</p>', 'Publish listing'));
     else if (action === 'comments') await comments(id);
     else if (action === 'admin-profile') await adminProfileModal(id);
+    else if (action === 'assignable-badge') {
+      const badge = button.dataset.badge, label = extraBadgeLabel(badge);
+      modal(`${active === 'true' ? 'Assign' : 'Remove'} ${label} badge?`, form('assignable-badge', `<p>This is a display badge and does not grant administrator permissions.</p><input type="hidden" name="id" value="${id}"><input type="hidden" name="badge" value="${esc(badge)}"><input type="hidden" name="active" value="${active}">`, `${active === 'true' ? 'Assign' : 'Remove'} ${label} badge`));
+    }
     else if (action === 'developer-badge') {
       modal(active === 'true' ? 'Assign Developer badge?' : 'Remove Developer badge?', form('developer-badge', `<p>This badge identifies a Developer. It does not grant administrator permissions.</p><input type="hidden" name="id" value="${id}"><input type="hidden" name="active" value="${active}">`, active === 'true' ? 'Assign Developer badge' : 'Remove Developer badge'));
     }
@@ -151,6 +155,10 @@ document.addEventListener('submit', async event => {
     if (name === 'listing') await api('/listings', 'POST', data);
     if (name === 'report') { await api('/reports', 'POST', data); notice('Report sent to the community team.'); }
     if (name === 'delete') await api(`/content/${data.type}/${data.id}`, 'DELETE');
+    if (name === 'assignable-badge') {
+      await api(`/admin/users/${data.id}/badges/${encodeURIComponent(data.badge)}`, 'PATCH', { enabled: data.active === 'true' });
+      notice(`${extraBadgeLabel(data.badge)} badge ${data.active === 'true' ? 'assigned' : 'removed'}.`);
+    }
     if (name === 'developer-badge') {
       await api(`/admin/users/${data.id}/developer-badge`, 'PATCH', { enabled: data.active === 'true' });
       notice(data.active === 'true' ? 'Developer badge assigned.' : 'Developer badge removed.');
@@ -176,7 +184,7 @@ initialize();
 
 function adminMemberRow(user) {
   const admin = !!user.is_admin;
-  return `<div class="admin-row"><div class="post-head">${avatar(user)}<div><button class="profile-link" data-action="admin-profile" data-id="${user.id}"><strong>${esc(user.name)} ${memberBadges(user)}${user.id === me.id ? ' (you)' : ''}</strong></button><span class="pill">${admin ? 'Administrator' : 'Member'}${user.banned ? ' / Suspended' : ''}</span></div></div><small>${esc(user.email)} / ${esc(user.city)}</small><div class="buttons"><button class="secondary" data-action="admin-profile" data-id="${user.id}">View profile</button><button class="${admin ? 'secondary' : ''}" data-action="admin-role" data-id="${user.id}" data-active="${!admin}" ${user.banned && !admin ? 'disabled title="Restore the account before granting access"' : ''}>${admin ? 'Revoke admin' : 'Grant admin'}</button><button class="secondary" data-action="developer-badge" data-id="${user.id}" data-active="${!user.developer_badge}" ${user.banned && !user.developer_badge ? 'disabled title="Restore the account before assigning a badge"' : ''}>${user.developer_badge ? 'Remove Developer badge' : 'Assign Developer badge'}</button>${!admin || user.banned ? `<button class="${user.banned ? 'secondary' : 'danger'}" data-action="ban" data-id="${user.id}" data-active="${!user.banned}">${user.banned ? 'Restore account' : 'Suspend account'}</button>` : ''}</div></div>`;
+  return `<div class="admin-row"><div class="post-head">${avatar(user)}<div><button class="profile-link" data-action="admin-profile" data-id="${user.id}"><strong>${esc(user.name)} ${memberBadges(user)}${user.id === me.id ? ' (you)' : ''}</strong></button><span class="pill">${admin ? 'Administrator' : 'Member'}${user.banned ? ' / Suspended' : ''}</span></div></div><small>${esc(user.email)} / ${esc(user.city)}</small><div class="buttons"><button class="secondary" data-action="admin-profile" data-id="${user.id}">View profile</button><button class="${admin ? 'secondary' : ''}" data-action="admin-role" data-id="${user.id}" data-active="${!admin}" ${user.banned && !admin ? 'disabled title="Restore the account before granting access"' : ''}>${admin ? 'Revoke admin' : 'Grant admin'}</button><button class="secondary" data-action="developer-badge" data-id="${user.id}" data-active="${!user.developer_badge}" ${user.banned && !user.developer_badge ? 'disabled title="Restore the account before assigning a badge"' : ''}>${user.developer_badge ? 'Remove Developer badge' : 'Assign Developer badge'}</button>${extraBadgeControls(user)}${!admin || user.banned ? `<button class="${user.banned ? 'secondary' : 'danger'}" data-action="ban" data-id="${user.id}" data-active="${!user.banned}">${user.banned ? 'Restore account' : 'Suspend account'}</button>` : ''}</div></div>`;
 }
 async function adminProfileModal(memberId) {
   const user = await api(`/admin/users/${memberId}/profile`);
@@ -185,5 +193,10 @@ async function adminProfileModal(memberId) {
 
 function memberBadges(user) {
   const flag = value => value === true || value === 1;
-  return `<span class="member-badges">${flag(user.staff_badge) ? '<span class="member-badge staff" title="Administrator" aria-label="Staff administrator">Staff</span>' : ''}${flag(user.developer_badge) ? '<span class="member-badge developer" title="Assigned by an administrator">Developer</span>' : ''}</span>`;
+  return `<span class="member-badges">${flag(user.staff_badge) ? '<span class="member-badge staff" title="Administrator" aria-label="Staff administrator">Staff</span>' : ''}${flag(user.developer_badge) ? '<span class="member-badge developer" title="Assigned by an administrator">Developer</span>' : ''}${flag(user.founding_member_badge) ? '<span class="member-badge founding-member" title="Assigned by an administrator">Founding Member</span>' : ''}${flag(user.tester_badge) ? '<span class="member-badge tester" title="Assigned by an administrator">Tester</span>' : ''}</span>`;
+}
+
+function extraBadgeLabel(badge) { return ({ founding_member: 'Founding Member', tester: 'Tester' })[badge] ?? 'Member'; }
+function extraBadgeControls(user) {
+  return ['founding_member', 'tester'].map(badge => `<button class="secondary" data-action="assignable-badge" data-badge="${badge}" data-id="${user.id}" data-active="${!user[`${badge}_badge`]}" ${user.banned && !user[`${badge}_badge`] ? 'disabled title="Restore the account before assigning a badge"' : ''}>${user[`${badge}_badge`] ? 'Remove' : 'Assign'} ${extraBadgeLabel(badge)} badge</button>`).join('');
 }

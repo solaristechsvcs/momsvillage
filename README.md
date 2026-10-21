@@ -15,7 +15,7 @@ The new navigation includes **Find moms**, **Friends**, **Messages**, and **Noti
 
 - Node.js 22 or later and npm
 - An existing MySQL 8+ database (or compatible MariaDB), reachable from your container
-- A dedicated database user with table creation, SELECT, INSERT, UPDATE, DELETE and index permissions
+- A dedicated database user with table creation, ALTER, SELECT, INSERT, UPDATE, DELETE and index permissions
 
 ## Setup
 
@@ -40,7 +40,7 @@ For Docker: `docker build -t momsvillage .`, then `docker run -d --name momsvill
 
 The new social navigation is visible after signing in; the public landing page stays similar. Check `/version` to identify the running application release. Version 0.2.1 adds versioned CSS/JavaScript URLs, disables browser/CDN caching of application assets at the origin, and prints the release in the startup log.
 
-After copying files, install dependencies and fully restart Wisp. The current log should say `Moms Village v0.3.1 listening on port ...`. If `/version` is missing or reports an older version, check the running container, application directory and Cloudflare Tunnel destination. If the origin is current but the public domain is stale, purge the site's Cloudflare cache and ensure custom cache rules respect origin headers or bypass caching for this app, particularly `/api/*` and `/version`. Origin headers cannot invalidate content that a proxy already cached or override a proxy configured to ignore them.
+After copying files, install dependencies and fully restart Wisp. The current log should say `Moms Village v0.3.2 listening on port ...`. If `/version` is missing or reports an older version, check the running container, application directory and Cloudflare Tunnel destination. If the origin is current but the public domain is stale, purge the site's Cloudflare cache and ensure custom cache rules respect origin headers or bypass caching for this app, particularly `/api/*` and `/version`. Origin headers cannot invalidate content that a proxy already cached or override a proxy configured to ignore them.
 
 ## Administrator roles (0.3)
 
@@ -57,6 +57,12 @@ Admins automatically display a **Staff** badge. In **Administration**, choose **
 Developer is a display badge, not an administrator role. A Developer cannot manage members or badges unless separately assigned admin access. Both badges can appear together. Revoking admin access removes Staff automatically without removing Developer. Members cannot set badges through signup or profile editing.
 
 Badges appear on public/member profile previews, own profile, discussion authors/comments, member search, friend lists, message authors/inbox previews, notifications, event hosts, listing sellers and the admin page. Their values are read from the current database roles/assignments rather than stored on each post. Restart after updating; the new badge table is created automatically without a manual SQL import.
+
+## Founding Member and Tester badges (0.3.2)
+
+Administrators can assign and remove **Founding Member** and **Tester** from each member's Administration row. Both badges are independent of Developer and Staff, appear in the same profile/name locations, and do not grant permissions. Gold identifies Founding Member; teal identifies Tester. Changes require confirmation and are audited.
+
+The first restart automatically converts the previous Developer-only badge column to expandable storage while preserving existing assignments. Your database user needs ALTER permission for this one-time upgrade. Fresh installs use the new schema directly. Keep your existing configuration; no manual SQL import is required.
 
 ## Included
 
