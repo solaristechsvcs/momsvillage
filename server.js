@@ -10,6 +10,7 @@ import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { text, id, price } from './validation.js';
 import { socialRouter } from './social.js';
+const { version } = JSON.parse(await readFile(new URL('./package.json', import.meta.url), 'utf8'));
 
 let config;
 try { config = (await import('./config.js')).default; }
@@ -220,7 +221,13 @@ app.patch('/api/admin/reports/:id', requireAdmin, async (req, res) => {
 });
 app.use('/api', (req, res) => res.status(404).json({ error: 'Endpoint not found.' }));
 app.get('/health', async (req, res) => { await query('SELECT 1'); res.json({ ok: true }); });
-app.use(express.static(fileURLToPath(new URL('./public', import.meta.url))));
+app.get('/version', (req, res) => {
+  res.set('Cache-Control', 'no-store').set('CDN-Cache-Control', 'no-store').json({ name: 'Moms Village', version });
+});
+app.use(express.static(fileURLToPath(new URL('./public', import.meta.url)), {
+  etag: false, lastModified: false,
+  setHeaders: res => res.set('Cache-Control', 'no-store').set('CDN-Cache-Control', 'no-store')
+}));
 app.use((error, req, res, next) => {
   if (res.headersSent) return next(error);
   const status = error.code === 'ER_DUP_ENTRY' ? 409 : error.status ?? 500;
@@ -228,6 +235,6 @@ app.use((error, req, res, next) => {
   res.status(status).json({ error: error.code === 'ER_DUP_ENTRY' ? 'This email is already registered.' : status >= 500 ? 'Something went wrong. Please try again.' : error.message });
 });
 await sessionStore.onReady();
-const server = app.listen(config.port ?? 3014, config.host ?? '0.0.0.0', () => console.log(`Moms Village listening on port ${config.port ?? 3014}`));
+const server = app.listen(config.port ?? 3014, config.host ?? '0.0.0.0', () => console.log(`Moms Village v${version} listening on port ${config.port ?? 3014}`));
 async function shutdown() { server.close(async () => { await db.end(); await sessionStore.close(); process.exit(0); }); }
 process.on('SIGTERM', shutdown); process.on('SIGINT', shutdown);

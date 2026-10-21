@@ -36,6 +36,12 @@ For Docker: `docker build -t momsvillage .`, then `docker run -d --name momsvill
 
 `GET /health` checks database connectivity and returns `{"ok":true}`. Startup intentionally fails if configuration or the database is unavailable.
 
+## Site still looks old after updating
+
+The new social navigation is visible after signing in; the public landing page stays similar. Check `/version` to identify the running application release. Version 0.2.1 adds versioned CSS/JavaScript URLs, disables browser/CDN caching of application assets at the origin, and prints the release in the startup log.
+
+After copying files, install dependencies and fully restart Wisp. The log should say `Moms Village v0.2.1 listening on port ...`. If `/version` is missing or reports an older version, check the running container, application directory and Cloudflare Tunnel destination. If the origin is current but the public domain is stale, purge the site's Cloudflare cache and ensure custom cache rules respect origin headers or bypass caching for this app, particularly `/api/*` and `/version`. Origin headers cannot invalidate content that a proxy already cached or override a proxy configured to ignore them.
+
 ## Included
 
 - Registration (18+ and guidelines agreement), sign-in and sign-out; bcrypt passwords and persistent MySQL sessions
