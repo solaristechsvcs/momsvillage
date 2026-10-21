@@ -26,7 +26,7 @@ test('MySQL-backed community workflows and access controls', { skip: process.env
       let cookie = '', csrf = '';
       return async (path, method = 'GET', body, status = 200, withCsrf = true) => {
         const multipart = body instanceof FormData;
-        const r = await fetch(base + '/api' + path, { method, headers: { cookie, ...(!multipart ? { 'Content-Type': 'application/json' } : {}), ...(withCsrf ? { 'x-csrf-token': csrf } : {}) }, body: body ? (multipart ? body : JSON.stringify(body)) : undefined });
+        const r = await fetch(base + '/api' + path, { signal: AbortSignal.timeout(10000), method, headers: { cookie, ...(!multipart ? { 'Content-Type': 'application/json' } : {}), ...(withCsrf ? { 'x-csrf-token': csrf } : {}) }, body: body ? (multipart ? body : JSON.stringify(body)) : undefined }).catch(error => { throw new Error(`${method} ${path}: ${error.message}`); });
         const setCookie = r.headers.get('set-cookie'); if (setCookie) cookie = setCookie.split(';')[0];
         const data = r.headers.get('content-type')?.startsWith('application/json') ? await r.json() : { bytes: Buffer.from(await r.arrayBuffer()), type: r.headers.get('content-type') }; assert.equal(r.status, status, `${method} ${path}: ${JSON.stringify(data)}`);
         if (data.csrf) csrf = data.csrf; return data;

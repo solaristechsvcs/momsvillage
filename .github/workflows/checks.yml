@@ -5,6 +5,7 @@ permissions:
 jobs:
   check:
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     services:
       mysql:
         image: mysql:8.4
@@ -26,7 +27,7 @@ jobs:
           node-version: 22
       - run: npm install --no-audit --no-fund
       - run: npm run check
-      - run: npm test
+      - run: timeout 100s npm test
         env:
           MV_INTEGRATION: '1'
           MV_UI: '1'
