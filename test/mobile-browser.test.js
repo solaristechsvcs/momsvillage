@@ -40,9 +40,9 @@ test('responsive pages, mobile menu, dialogs and chat fit real browser viewports
   }
   await page.setViewportSize({width:390,height:844});await page.goto(url+'/#feed');await page.locator('.dock-launcher').click();await page.locator('[data-dock-action="open"][data-id="2"]').click();
   const first=page.locator('[data-dock-peer="2"]');await first.locator('textarea').fill('A draft that stays');
-  await page.locator('[data-dock-action="open"][data-id="3"]').click();await page.locator('[data-dock-peer="3"]').waitFor();assert.ok((await first.getAttribute('class')).includes('minimized'));
+  await page.locator('.dock-launcher').click();await page.locator('[data-dock-action="open"][data-id="3"]').click();await page.locator('[data-dock-peer="3"]').waitFor();assert.ok((await first.getAttribute('class')).includes('minimized'));
   assert.equal(await first.locator('textarea').inputValue(),'A draft that stays');
-  await page.locator('[data-dock-action="inbox-close"]').click();await fits('Mobile chat');
+  await fits('Mobile chat');
   const win=await page.locator('[data-dock-peer="3"]').boundingBox();assert.ok(win.x>=0&&win.x+win.width<=391);
   await page.setViewportSize({width:390,height:500});await fits('Short viewport');
   assert.deepEqual(errors,[]);
