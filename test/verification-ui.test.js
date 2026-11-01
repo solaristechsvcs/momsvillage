@@ -71,3 +71,21 @@ test('flagged images stay in private admin review with explicit decisions and re
     await waitFor(()=>revoked);await waitFor(()=>!w.document.querySelector('.verification-card'));
   }finally{ui.close();}
 });
+
+test('temporary password gate blocks community navigation until replacement', {skip:process.env.MV_UI!=='1',timeout:10000},async()=>{
+ const user={id:2,name:'Member',membership_status:'approved',must_change_password:true};let changed=false;
+ const ui=await page('feed',async(url,opts={})=>{
+  if(url==='/api/session')return response({user,csrf:'test'});
+  if(url==='/api/password/change'){const body=JSON.parse(opts.body);assert.equal(body.current_password,'Temporary-pass-123');assert.equal(body.new_password,'New-password-123');changed=true;user.must_change_password=false;return response({ok:true});}
+  if(url==='/api/unread')return response({messages:0,notifications:0});
+  if(url==='/api/posts')return response([]);
+  assert.fail('Unexpected gate request '+url);
+ });
+ try{
+  const w=ui.w;await waitFor(()=>w.document.querySelector('form[data-form="password-change"]'));
+  assert.equal(w.document.querySelector('.sidebar'),null);
+  const f=w.document.querySelector('form[data-form="password-change"]');f.elements.current_password.value='Temporary-pass-123';f.elements.new_password.value='New-password-123';f.elements.confirm_password.value='Mismatch-password';
+  f.dispatchEvent(new w.Event('submit',{bubbles:true,cancelable:true}));await waitFor(()=>f.querySelector('.form-error').textContent.includes('match'));assert.equal(changed,false);
+  f.elements.confirm_password.value='New-password-123';f.dispatchEvent(new w.Event('submit',{bubbles:true,cancelable:true}));await waitFor(()=>changed);await waitFor(()=>w.document.querySelector('.sidebar'));
+ }finally{ui.close();}
+});
