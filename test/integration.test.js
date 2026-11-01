@@ -387,6 +387,17 @@ test('MySQL-backed community workflows and access controls', { skip: process.env
     assert.equal((await a('/verification')).enabled,false);
     await a('/verification/attempts','POST',{consent:true},503);
 
+    await a('/admin/logs','GET',undefined,403);
+    await a('/admin/reports','GET',undefined,403);
+    const logPage=await admin('/admin/logs');
+    assert.ok(logPage.logs.length>0);
+    assert.ok(logPage.logs.every(row=>row.actor_name && row.target_name && !Object.hasOwn(row,'password')));
+    assert.ok(logPage.logs.every((row,index)=>index===0 || row.id<logPage.logs[index-1].id));
+    await admin('/admin/logs?before=invalid','GET',undefined,400);
+    const olderLogs=await admin('/admin/logs?before='+logPage.logs[0].id);
+    assert.ok(olderLogs.logs.every(row=>row.id<logPage.logs[0].id));
+    assert.ok(Array.isArray(await admin('/admin/reports')));
+
     // Password resets revoke sessions and require a new password before any community API.
     const resetPath='/admin/users/'+userB.id+'/password';
     await a(resetPath,'POST',{temporary_password:'Temporary-pass-123',current_password:'a-long-password-123'},403);

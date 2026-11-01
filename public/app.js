@@ -35,7 +35,7 @@ function auth(register) {
 }
 function guidelines() { modal('A kinder corner of the internet.', '<p>Be respectful, supportive, and honest. Moms Village is for adults aged 18 and older. Harassment, hate, scams, illegal items, and unsafe content are not welcome.</p><p>Protect your privacy and your children’s privacy. Avoid sharing home addresses, school details, and other sensitive information. Community profiles and content are visible only to approved members; local groups are open to approved members. Applicants must confirm that they meet the mothers-only membership policy. Applications are reviewed by administrators.</p><p>Report content that breaks these guidelines. Staff can remove content and suspend accounts. Meet marketplace contacts in public and use your own judgment. Marketplace listings are classifieds; Moms Village does not process payments or guarantee transactions.</p><p>Choose what you share. Displaying an external image loads it from its host, which may receive your IP address. Community discussions are peer support and do not replace professional advice.</p>'); }
 function shell() {
-  $('#app').innerHTML = `<header>${logo}<span class="header-note">Your village, wherever you are.</span><div class="account"><span class="muted">Hi, ${esc(me.name.split(' ')[0])}</span><a href="#profile" aria-label="My profile">${avatar(me)}</a><button class="subtle" data-action="logout">Sign out</button></div></header><div class="layout"><aside class="sidebar"><nav aria-label="Main navigation">${Object.entries(labels).filter(([key]) => !['admin','applications','verification-review'].includes(key) || me.admin).map(([key, [icon, label]]) => `<a class="nav-link ${page === key || (page === 'group' && key === 'groups') ? 'active' : ''}" href="#${key}"><span class="nav-icon">${icon}</span>${label}${['messages','notifications'].includes(key) ? `<span class="badge" data-count="${key}" ${unread[key] ? '' : 'hidden'}>${unread[key] || ''}</span>` : ''}</a>`).join('')}</nav><div class="side-card"><span>❋</span><h3>A little kindness<br>goes a long way.</h3><p>Every mom’s journey looks different. There’s room for yours here.</p><a href="#guidelines">Our community guidelines ↗</a></div></aside><main id="main"><p class="loading">Gathering the village…</p></main><aside class="rail"><div class="card"><span class="pill">A NOTE FOR YOUR DAY</span><h3>You’re doing better<br>than you think.</h3><p>Some days, showing up is the big win. We’re glad you’re here.</p></div><div class="card"><h3>Make room for connection</h3><p>Find a group close to home or create a gathering of your own.</p><a href="#groups"><button class="secondary full">Explore local groups ↗</button></a></div><div class="card"><h3>Village values</h3><div class="rail-item"><span>♡</span><div><strong>Lead with kindness</strong><small>A supportive space for every chapter.</small></div></div><div class="rail-item"><span>♧</span><div><strong>Share at your own pace</strong><small>You choose what to share.</small></div></div><div class="rail-item"><span>☀</span><div><strong>Help each other grow</strong><small>Small gestures make a difference.</small></div></div></div><div class="footer-note">Moms Village © ${new Date().getFullYear()}<br><a href="#guidelines">Community guidelines</a></div></aside></div>`;
+  $('#app').innerHTML = `<header>${logo}<span class="header-note">Your village, wherever you are.</span><div class="account"><span class="muted">Hi, ${esc(me.name.split(' ')[0])}</span><a href="#profile" aria-label="My profile">${avatar(me)}</a><button class="subtle" data-action="logout">Sign out</button></div></header><div class="layout"><aside class="sidebar"><nav aria-label="Main navigation">${Object.entries(labels).filter(([key]) => !['applications','verification-review'].includes(key) && (key !== 'admin' || me.admin) && (key !== 'invitations' || !me.admin)).map(([key, [icon, label]]) => `<a class="nav-link ${page === key || (page === 'group' && key === 'groups') ? 'active' : ''}" href="#${key}"><span class="nav-icon">${icon}</span>${label}${['messages','notifications'].includes(key) ? `<span class="badge" data-count="${key}" ${unread[key] ? '' : 'hidden'}>${unread[key] || ''}</span>` : ''}</a>`).join('')}</nav><div class="side-card"><span>❋</span><h3>A little kindness<br>goes a long way.</h3><p>Every mom’s journey looks different. There’s room for yours here.</p><a href="#guidelines">Our community guidelines ↗</a></div></aside><main id="main"><p class="loading">Gathering the village…</p></main><aside class="rail"><div class="card"><span class="pill">A NOTE FOR YOUR DAY</span><h3>You’re doing better<br>than you think.</h3><p>Some days, showing up is the big win. We’re glad you’re here.</p></div><div class="card"><h3>Make room for connection</h3><p>Find a group close to home or create a gathering of your own.</p><a href="#groups"><button class="secondary full">Explore local groups ↗</button></a></div><div class="card"><h3>Village values</h3><div class="rail-item"><span>♡</span><div><strong>Lead with kindness</strong><small>A supportive space for every chapter.</small></div></div><div class="rail-item"><span>♧</span><div><strong>Share at your own pace</strong><small>You choose what to share.</small></div></div><div class="rail-item"><span>☀</span><div><strong>Help each other grow</strong><small>Small gestures make a difference.</small></div></div></div><div class="footer-note">Moms Village © ${new Date().getFullYear()}<br><a href="#guidelines">Community guidelines</a></div></aside></div>`;
 }
 const heading = (title, subtitle, action, button) => `<div class="page-heading"><div><h1>${esc(title)}</h1><p class="muted">${esc(subtitle)}</p></div>${action ? `<button data-action="${action}">${esc(button)}</button>` : ''}</div>`;
 function postCard(p) {
@@ -44,9 +44,13 @@ function postCard(p) {
 function composer() { return `<div class="card composer">${avatar(me)}<button data-action="post">What’s on your mind, ${esc(me.name.split(' ')[0])}?</button></div>`; }
 async function load() {
   const current = ++generation;
-  const route = location.hash.slice(1) || 'feed';
+  let route = location.hash.slice(1) || 'feed';
+  if(route.split('?')[0]==='applications' || route.split('?')[0]==='verification-review') {
+    route=route.replace(/^applications/,'admin/applications').replace(/^verification-review/,'admin/verification');
+    history.replaceState(null,'','#'+route);
+  }
   if (route === 'guidelines') { history.replaceState(null, '', '#feed'); await load(); guidelines(); return; }
-  page = route.startsWith('messages/') ? 'messages' : route.startsWith('group/') ? 'group' : labels[route.split('?')[0]] ? route.split('?')[0] : 'feed';
+  page = route.startsWith('admin/') ? 'admin' : route.startsWith('messages/') ? 'messages' : route.startsWith('group/') ? 'group' : labels[route.split('?')[0]] ? route.split('?')[0] : 'feed';
   if (!me) { landing(); return; }
   if (me.must_change_password) {
  $('#app').innerHTML=`<header>${logo}<button data-action="logout">Sign out</button></header><main class="landing"><section class="card"><h1>Choose your new password</h1><p>Replace your temporary password before continuing.</p>${form('password-change',field('current_password','Temporary password',{type:'password',max:72})+field('new_password','New password',{type:'password',max:72})+field('confirm_password','Confirm new password',{type:'password',max:72})+'<p class="hint">Use at least 12 characters and at most 72 UTF-8 bytes.</p>','Save new password')}</section></main>`;
@@ -81,10 +85,8 @@ async function load() {
       records = await api('/listings'); html = heading('A new home for old favorites', 'Buy, sell, and pass a little goodness forward.', 'new-listing', '+ List an item') + '<p class="hint">Community classifieds · Prices in USD · Arrange exchanges directly with sellers.</p><input class="search" id="search" type="search" aria-label="Search listings" placeholder="Search items or your city…"><div class="grid" id="cards">' + listingCards(records) + '</div>';
     } else if (page === 'profile') {
       html = heading('Your little corner', 'Let your village get to know you.') + `<div class="card"><div class="profile-cover"></div>${avatar(me)}${memberBadges(me)}${form('profile', field('name', 'Display name', { value: me.name, max: 80 }) + field('city', 'City or area', { value: me.city, max: 120, required: false }) + field('bio', 'About you', { type: 'textarea', value: me.bio, max: 2000, required: false }) + imageField('avatar', 'Profile picture', me.avatar) + '<p class="hint">These details are visible to signed-in members. Your email stays private.</p><button type="button" class="secondary" data-action="image-library">My image library</button>', 'Save profile')}</div>`;
-    } else if (page === 'admin' && me.admin) {
-      const adminQuery = new URLSearchParams(route.split('?')[1]).get('q') ?? '';
-      const data = await api(`/admin?q=${encodeURIComponent(adminQuery)}`); records = data.reports;
-      html = heading('Care for the village', 'Review reports and manage community accounts.') + `<section class="card"><h2>Open reports</h2>${data.reports.map(r => `<div class="admin-row"><strong>${esc(r.target_type)} #${r.target_id}</strong><p>${esc(r.reason)}</p><small>Reported by ${esc(r.name)} · ${esc(date(r.created_at))}</small><div class="buttons"><button class="secondary" data-action="review" data-id="${r.id}">View content</button><button class="danger" data-action="delete" data-type="${esc(r.target_type)}" data-id="${r.target_id}">Remove content</button><button class="secondary" data-action="resolve" data-id="${r.id}">Resolve</button></div></div>`).join('') || '<p class="muted">No open reports.</p>'}</section><section class="card"><h2>Members</h2>${form('admin-search', field('q', 'Find a member by name or email', { value: adminQuery, max: 100, required: false }), 'Search members')}<p class="hint">Showing up to 200 matching accounts.</p>${data.users.map(adminMemberRow).join('')}</section>`;
+    } else if (page === 'admin') {
+      html = await administrationPage(route);
     } else html = empty('This page is unavailable.', 'Choose a page from the navigation.');
     if (current === generation) {
       $('#main').innerHTML = html;
@@ -161,7 +163,7 @@ document.addEventListener('submit', async event => {
   if (['verification-delete','verification-review','verification-revoke'].includes(f.dataset.form)) { await handleVerificationSubmit(f); return; }
   if (['membership-application','membership-review'].includes(f.dataset.form)) { await handleMembershipSubmit(f); return; }
   if (f.dataset.form === 'admin-search') {
-    const hash = `admin?q=${encodeURIComponent(new FormData(f).get('q') ?? '')}`;
+    const hash = `admin/users?q=${encodeURIComponent(new FormData(f).get('q') ?? '')}`;
     if (location.hash.slice(1) === hash) await load(); else location.hash = hash;
     return;
   }
@@ -241,3 +243,38 @@ function latestCommentPreview(comment) {
   if (!comment) return '';
   return `<section class="latest-comment" aria-label="Newest comment"><span class="latest-comment-label">Newest comment</span><div class="latest-comment-row"><button class="profile-link" data-action="member" data-id="${comment.user_id}" aria-label="View ${esc(comment.name)} profile">${avatar(comment)}</button><div class="latest-comment-content"><button class="profile-link" data-action="member" data-id="${comment.user_id}"><strong>${esc(comment.name)}</strong></button> ${memberBadges(comment)}<p>${esc(comment.body)}</p><small>${esc(date(comment.created_at))}</small></div></div></section>`;
 }
+
+async function administrationPage(route) {
+  if(!me.admin) return empty('Administrator access required.','Choose another page.');
+  const tabs={users:'Users',applications:'Membership',verification:'Verification review',moderation:'Moderation',logs:'Logs',invitations:'Invitations'};
+  const section=route.split('?')[0].split('/')[1] || 'users';
+  if(!Object.hasOwn(tabs,section)) return empty('Administration page unavailable.','Choose Administration from the navigation.');
+  const params=new URLSearchParams(route.split('?')[1]);
+  let html=heading('Administration','Manage your village from one place.')+`<nav class="admin-tabs" aria-label="Administration sections">${Object.entries(tabs).map(([key,label])=>`<a href="#admin/${key}" class="${section===key?'active':''}" ${section===key?'aria-current="page"':''}>${esc(label)}</a>`).join('')}</nav>`;
+  if(section==='applications') return html+await membershipPage(route);
+  if(section==='verification') return html+await verificationPage(route);
+  if(section==='invitations') {
+    const [own,all]=await Promise.all([membershipPage(route,'invitations'),api('/admin/invitations')]);
+    return html+own+'<section class="card"><h2>Community invitations</h2>'+invitationRows(all,true)+'</section>';
+  }
+  if(section==='logs') {
+    const before=params.get('before');
+    const data=await api('/admin/logs'+(before?'?before='+encodeURIComponent(before):''));
+    return html+heading('Audit logs','Recorded account, membership, verification, and password actions.')+
+      '<p class="hint">Newest first. Passwords and private review photos are never shown here.</p>'+
+      (data.logs.length?'<div class="audit-list">'+data.logs.map(row=>`<article class="card"><strong>${esc(row.action.replaceAll('_',' '))}</strong><p>${esc(row.actor_name)} (#${row.actor_id}) → ${esc(row.target_name)} (#${row.target_id})</p><small>${esc(date(row.created_at))} · #${row.id}</small></article>`).join('')+'</div>':empty('No audit entries.','Recorded activity will appear here.'))+
+      `<div class="buttons">${before?'<a class="button-link" href="#admin/logs">Newest entries</a>':''}${data.next_before?`<a class="button-link" href="#admin/logs?before=${data.next_before}">Older entries</a>`:''}</div>`;
+  }
+  if(section==='moderation') {
+    const reports=await api('/admin/reports');records=reports;
+    return html+heading('Moderation','Review reports and remove content that breaks community rules.')+
+      '<section class="card"><h2>Open reports</h2>'+
+      (reports.map(r=>`<div class="admin-row"><strong>${esc(r.target_type)} #${r.target_id}</strong><p>${esc(r.reason)}</p><small>Reported by ${esc(r.name)} · ${esc(date(r.created_at))}</small><div class="buttons"><button class="secondary" data-action="review" data-id="${r.id}">View content</button><button class="danger" data-action="delete" data-type="${esc(r.target_type)}" data-id="${r.target_id}">Remove content</button><button class="secondary" data-action="resolve" data-id="${r.id}">Resolve</button></div></div>`).join('') || '<p class="muted">No open reports.</p>')+'</section>';
+  }
+  const q=params.get('q') ?? '';
+  const data=await api('/admin?q='+encodeURIComponent(q));
+  return html+heading('Users','Manage profiles, roles, badges, membership, and temporary passwords.')+
+    '<section class="card">'+form('admin-search',field('q','Find a member by name or email',{value:q,max:100,required:false}),'Search members')+
+    '<p class="hint">Showing up to 200 matching accounts.</p>'+data.users.map(adminMemberRow).join('')+'</section>';
+}
+

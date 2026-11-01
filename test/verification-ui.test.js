@@ -89,3 +89,35 @@ test('temporary password gate blocks community navigation until replacement', {s
   f.elements.confirm_password.value='New-password-123';f.dispatchEvent(new w.Event('submit',{bubbles:true,cancelable:true}));await waitFor(()=>changed);await waitFor(()=>w.document.querySelector('.sidebar'));
  }finally{ui.close();}
 });
+
+test('administration consolidates staff navigation and keeps audit logs private', {skip:process.env.MV_UI!=='1',timeout:10000},async()=>{
+ const user={id:1,name:'Admin',admin:true,membership_status:'approved'};
+ const ui=await page('admin/users',async(url)=>{
+  if(url==='/api/session')return response({user,csrf:'test'});
+  if(url==='/api/unread')return response({messages:0,notifications:0});
+  if(url==='/api/admin?q=')return response({users:[],reports:[]});
+  if(url==='/api/admin/logs')return response({logs:[{id:4,action:'password_reset',actor_name:'<Admin>',actor_id:1,target_name:'Member',target_id:2,created_at:'2026-11-01T00:00:00Z'}],next_before:4});
+  if(url==='/api/admin/logs?before=4')return response({logs:[],next_before:null});
+  if(url==='/api/admin/reports')return response([]);
+  assert.fail('Unexpected administration request '+url);
+ });
+ try{
+  const w=ui.w;await waitFor(()=>w.document.querySelector('.admin-tabs'));
+  assert.equal(w.document.querySelectorAll('.admin-tabs a').length,6);
+  assert.equal(w.document.querySelector('.sidebar a[href="#applications"]'),null);
+  assert.equal(w.document.querySelector('.sidebar a[href="#verification-review"]'),null);
+  assert.equal(w.document.querySelector('.sidebar a[href="#invitations"]'),null);
+  assert.ok(w.document.querySelector('.sidebar a[href="#admin"].active'));
+  w.location.hash='admin/logs';await waitFor(()=>w.document.querySelector('.audit-list'));
+  assert.ok(w.document.querySelector('.audit-list').textContent.includes('<Admin>'));
+  assert.equal(w.document.querySelector('.audit-list admin'),null);
+  w.document.querySelector('a[href="#admin/logs?before=4"]').click();await waitFor(()=>w.document.querySelector('#main').textContent.includes('No audit entries'));
+  w.location.hash='admin/moderation';await waitFor(()=>w.document.querySelector('#main').textContent.includes('No open reports'));
+ }finally{ui.close();}
+ const member=await page('admin/logs',async(url)=>{
+  if(url==='/api/session')return response({user:{id:2,name:'Member',admin:false,membership_status:'approved'},csrf:'test'});
+  if(url==='/api/unread')return response({messages:0,notifications:0});
+  assert.fail('Member must not request staff data '+url);
+ });
+ try{await waitFor(()=>member.w.document.querySelector('#main')?.textContent.includes('Administrator access required'));assert.equal(member.w.document.querySelector('.admin-tabs'),null);}finally{member.close();}
+});

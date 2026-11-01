@@ -1,5 +1,8 @@
 # Moms Village
 
+Version 0.5.2 groups staff tools under Administration with top navigation for Users, Membership, Verification review, Moderation, Logs, and Invitations. Logs display recorded account, membership, verification, and password actions, newest first, with pagination. Existing application and verification review links redirect to their Administration tabs. Member verification and personal invitations remain available outside staff tools.
+
+
 Version 0.5.1: Administration now offers Set temporary password. Confirm your administrator password, choose a temporary password (12 characters minimum, 72 UTF-8 bytes maximum), and share it privately after confirming account ownership. It expires after 24 hours and must be changed before community access. Existing sessions are invalidated. Only hashes are stored; audit entries contain no passwords. Resetting does not approve or restore membership. Administrators must ask another administrator to reset their own account. Update files and restart; the password_state table is created automatically.
 
 

@@ -32,8 +32,8 @@ function invitationRows(rows, admin = false) {
     return `<div class="admin-row"><strong>Invitation …${esc(i.suffix)}</strong> <span class="pill">${state}</span>${admin ? `<p>Issued by ${esc(i.issuer_name)}</p>` : ''}<small>Expires ${esc(date(i.expires_at))}</small>${state === 'Active' ? `<button class="secondary" data-action="revoke-invitation" data-id="${i.id}">Revoke invitation</button>` : ''}</div>`;
   }).join('') || '<p class="muted">No invitations yet.</p>';
 }
-async function membershipPage(route) {
-  if (page === 'invitations') {
+async function membershipPage(route, view=page) {
+  if (view === 'invitations') {
     const rows = await api('/invitations');
     return heading('Invite someone you trust','Invitations support an application. Every new member still needs approval.','create-invitation','Create invitation') + '<p class="hint">Each code can be used once, expires after 14 days and is displayed only when created. You may have 5 active codes and issue 20 per week. Share privately with a mother who meets the community policy.</p><section class="card">' + invitationRows(rows) + '</section>';
   }
@@ -43,7 +43,7 @@ async function membershipPage(route) {
   applicationReviews = applications;
   return heading('Membership applications','Review eligibility statements and referrals before admitting members.') +
     '<p class="hint">Review self-declared eligibility, authenticity concerns and community fit. Do not ask for children’s photos or records, or assess gender from appearance.</p><div class="buttons">' +
-    ['pending','approved','declined'].map(s => `<a class="button-link" href="#applications?status=${s}">${s[0].toUpperCase()+s.slice(1)}</a>`).join('') + '</div><p class="hint">Showing up to 200 applications. From Administration, use Review membership to open a specific account.</p>' +
+    ['pending','approved','declined'].map(s => `<a class="button-link" href="#admin/applications?status=${s}">${s[0].toUpperCase()+s.slice(1)}</a>`).join('') + '</div><p class="hint">Showing up to 200 applications. From Administration, use Review membership to open a specific account.</p>' +
     (applications.map(reviewCard).join('') || empty('No applications in this view.','New submissions will appear here.')) +
     '<details class="card"><summary>Recent community invitations</summary>' + invitationRows(invitations,true) + '</details>';
 }
@@ -51,7 +51,7 @@ async function handleMembershipClick(button) {
   const { action,id } = button.dataset; button.disabled = true;
   try {
     if (action === 'membership-refresh') { await initialize(); return; }
-    if (action === 'review-member') { closeModal(); location.hash = 'applications?user=' + id; return; }
+    if (action === 'review-member') { closeModal(); location.hash = 'admin/applications?user=' + id; return; }
     if (action === 'membership-review') {
       const a = applicationReviews.find(a => a.user_id === Number(id)), review = button.dataset.review;
       modal({approve:'Approve membership?',decline:'Decline membership?',request_changes:'Request more information?'}[review],

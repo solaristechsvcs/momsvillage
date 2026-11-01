@@ -262,6 +262,15 @@ app.get('/api/admin', requireAdmin, async (req, res) => {
   const reports = await query('SELECT r.*,u.name FROM reports r JOIN users u ON u.id=r.user_id WHERE resolved=FALSE ORDER BY r.id DESC LIMIT 200');
   res.json({ users, reports });
 });
+app.get('/api/admin/reports',requireAdmin,async(req,res)=>{
+ const reports=await query('SELECT r.*,u.name FROM reports r JOIN users u ON u.id=r.user_id WHERE resolved=FALSE ORDER BY r.id DESC LIMIT 200');
+ res.json(reports);
+});
+app.get('/api/admin/logs',requireAdmin,async(req,res)=>{
+ const before=req.query.before===undefined ? null : id(req.query.before);
+ const rows=await query('SELECT a.id,a.actor_id,a.target_id,a.action,a.created_at,actor.name AS actor_name,target.name AS target_name FROM admin_audit a JOIN users actor ON actor.id=a.actor_id JOIN users target ON target.id=a.target_id'+(before?' WHERE a.id<?':'')+' ORDER BY a.id DESC LIMIT 100',before?[before]:[]);
+ res.json({logs:rows,next_before:rows.length===100?rows[rows.length-1].id:null});
+});
 app.get('/api/admin/users/:id/profile', requireAdmin, async (req, res) => {
   const user = await existing('users', req.params.id);
   const [badges] = await query(`SELECT ${badgeColumns()} FROM users u WHERE u.id=?`, [user.id]);
