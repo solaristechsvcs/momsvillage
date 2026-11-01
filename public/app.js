@@ -11,6 +11,7 @@ async function api(path, method = 'GET', data) {
   const response = await fetch(`/api${path}`, { method, headers: { 'Content-Type': 'application/json', 'x-csrf-token': csrf }, body: data ? JSON.stringify(data) : undefined });
   const result = await response.json().catch(() => ({ error: 'Unable to reach the server.' }));
   if (!response.ok) {
+    if (result.code === 'PASSWORD_CHANGE_REQUIRED' && me) { me.must_change_password=true; closeModal(); queueMicrotask(()=>load()); }
     if (result.code === 'MEMBERSHIP_REQUIRED' && me) { me.membership_status = result.membership_status; closeModal(); queueMicrotask(() => initialize()); }
     throw new Error(result.error || 'Unable to complete that request.');
   }
@@ -47,6 +48,10 @@ async function load() {
   if (route === 'guidelines') { history.replaceState(null, '', '#feed'); await load(); guidelines(); return; }
   page = route.startsWith('messages/') ? 'messages' : route.startsWith('group/') ? 'group' : labels[route.split('?')[0]] ? route.split('?')[0] : 'feed';
   if (!me) { landing(); return; }
+  if (me.must_change_password) {
+ $('#app').innerHTML=`<header>${logo}<button data-action="logout">Sign out</button></header><main class="landing"><section class="card"><h1>Choose your new password</h1><p>Replace your temporary password before continuing.</p>${form('password-change',field('current_password','Temporary password',{type:'password',max:72})+field('new_password','New password',{type:'password',max:72})+field('confirm_password','Confirm new password',{type:'password',max:72})+'<p class="hint">Use at least 12 characters and at most 72 UTF-8 bytes.</p>','Save new password')}</section></main>`;
+ return;
+ }
   if (me.membership_status !== 'approved') {
     try { await renderMembershipGate(); } catch (error) { $('#app').innerHTML = '<main class="landing">' + empty('Unable to load your application.',error.message) + '<button data-action="membership-refresh">Try again</button></main>'; }
     return;
@@ -116,6 +121,10 @@ document.addEventListener('click', async event => {
     else if (action === 'new-listing') modal('Pass something lovely forward', form('listing', field('title', 'Item name', { max: 140 }) + field('price', 'Price in USD (0 for free)', { type: 'number' }) + field('city', 'City or area', { value: me.city, max: 120 }) + field('description', 'Description and condition', { type: 'textarea', max: 3000 }) + imageField('image', 'Item photo') + field('contact', 'How should buyers contact you?', { max: 250 }) + '<p class="hint">Contact instructions are shared with signed-in members. Choose a contact method you are comfortable sharing.</p>', 'Publish listing'));
     else if (action === 'older-comments') await comments(id, button.dataset.before);
     else if (action === 'comments') await comments(id);
+    else if (action === 'password-reset') {
+ const user=await api(`/admin/users/${id}/profile`);
+ modal('Set temporary password',form('password-reset',`<p>Reset password for <strong>${esc(user.name)}</strong> (${esc(user.email)}). Existing sessions will end. The temporary password expires in 24 hours and must be replaced at sign-in. Confirm account ownership before sharing it privately.</p><input type="hidden" name="id" value="${id}">${field('temporary_password','Temporary password',{type:'password',max:72})}${field('confirm_password','Confirm temporary password',{type:'password',max:72})}${field('current_password','Your administrator password',{type:'password',max:72})}<p class="hint">Use at least 12 characters. The password will not be displayed again.</p>`,'Set temporary password'));
+ }
     else if (action === 'admin-profile') await adminProfileModal(id);
     else if (action === 'assignable-badge') {
       const badge = button.dataset.badge, label = extraBadgeLabel(badge);
@@ -179,6 +188,15 @@ document.addEventListener('submit', async event => {
       await api(`/admin/users/${data.id}/developer-badge`, 'PATCH', { enabled: data.active === 'true' });
       notice(data.active === 'true' ? 'Developer badge assigned.' : 'Developer badge removed.');
     }
+    if (name === 'password-reset' || name === 'password-change') {
+ const candidate=name==='password-reset'?data.temporary_password:data.new_password;
+ if(candidate!==data.confirm_password) throw new Error('Passwords do not match.');
+ if(name==='password-reset') {
+ await api(`/admin/users/${data.id}/password`,'POST',{current_password:data.current_password,temporary_password:candidate});
+ notice('Temporary password set. Share it privately; it expires in 24 hours.');
+ } else {await api('/password/change','POST',{current_password:data.current_password,new_password:candidate});notice('Password changed.');}
+ f.reset();
+ }
     if (name === 'admin-role') {
       await api(`/admin/users/${data.id}/role`, 'PATCH', { is_admin: data.active === 'true' });
       notice(data.active === 'true' ? 'Administrator access granted.' : 'Administrator access revoked.');
@@ -192,7 +210,7 @@ document.addEventListener('submit', async event => {
 async function initialize() {
   try { const state = await api('/session'); me = state.user; csrf = state.csrf;
     applicationPolicy = state.membership_policy ?? applicationPolicy;
-    if (me?.membership_status === 'approved') unread = await api('/unread');
+    if (me?.membership_status === 'approved' && !me.must_change_password) unread = await api('/unread');
     await load(); }
   catch (error) { $('#app').innerHTML = `<main class="landing">${empty('The village is taking a moment.', error.message)}</main>`; }
 }
@@ -202,7 +220,7 @@ initialize();
 function adminMemberRow(user) {
   const admin = !!user.is_admin;
   const restricted = user.membership_status !== 'approved';
-  return `<div class="admin-row"><div class="post-head">${avatar(user)}<div><button class="profile-link" data-action="admin-profile" data-id="${user.id}"><strong>${esc(user.name)} ${memberBadges(user)}${user.id === me.id ? ' (you)' : ''}</strong></button><span class="pill">${admin ? 'Administrator' : 'Member'}${user.banned ? ' / Suspended' : ''}</span></div></div><small>${esc(user.email)} / ${esc(user.city)}</small><div class="buttons"><button class="secondary" data-action="admin-profile" data-id="${user.id}">View profile</button><button class="${admin ? 'secondary' : ''}" data-action="admin-role" data-id="${user.id}" data-active="${!admin}" ${(user.banned || restricted) && !admin ? 'disabled title="Restore the account before granting access"' : ''}>${admin ? 'Revoke admin' : 'Grant admin'}</button><button class="secondary" data-action="developer-badge" data-id="${user.id}" data-active="${!user.developer_badge}" ${(user.banned || restricted) && !user.developer_badge ? 'disabled title="Restore the account before assigning a badge"' : ''}>${user.developer_badge ? 'Remove Developer badge' : 'Assign Developer badge'}</button><button class="secondary" data-action="review-member" data-id="${user.id}">Review membership</button><span class="pill">${esc(user.banned ? 'Suspended' : user.membership_status ?? 'pending')}</span>${extraBadgeControls(user)}${!admin || user.banned ? `<button class="${user.banned ? 'secondary' : 'danger'}" data-action="ban" data-id="${user.id}" data-active="${!user.banned}">${user.banned ? 'Restore account' : 'Suspend account'}</button>` : ''}</div></div>`;
+  return `<div class="admin-row"><div class="post-head">${avatar(user)}<div><button class="profile-link" data-action="admin-profile" data-id="${user.id}"><strong>${esc(user.name)} ${memberBadges(user)}${user.id === me.id ? ' (you)' : ''}</strong></button><span class="pill">${admin ? 'Administrator' : 'Member'}${user.banned ? ' / Suspended' : ''}</span></div></div><small>${esc(user.email)} / ${esc(user.city)}</small><div class="buttons">${user.id!==me.id ? `<button class="secondary" data-action="password-reset" data-id="${user.id}">Set temporary password</button>` : ""}<button class="secondary" data-action="admin-profile" data-id="${user.id}">View profile</button><button class="${admin ? 'secondary' : ''}" data-action="admin-role" data-id="${user.id}" data-active="${!admin}" ${(user.banned || restricted) && !admin ? 'disabled title="Restore the account before granting access"' : ''}>${admin ? 'Revoke admin' : 'Grant admin'}</button><button class="secondary" data-action="developer-badge" data-id="${user.id}" data-active="${!user.developer_badge}" ${(user.banned || restricted) && !user.developer_badge ? 'disabled title="Restore the account before assigning a badge"' : ''}>${user.developer_badge ? 'Remove Developer badge' : 'Assign Developer badge'}</button><button class="secondary" data-action="review-member" data-id="${user.id}">Review membership</button><span class="pill">${esc(user.banned ? 'Suspended' : user.membership_status ?? 'pending')}</span>${extraBadgeControls(user)}${!admin || user.banned ? `<button class="${user.banned ? 'secondary' : 'danger'}" data-action="ban" data-id="${user.id}" data-active="${!user.banned}">${user.banned ? 'Restore account' : 'Suspend account'}</button>` : ''}</div></div>`;
 }
 async function adminProfileModal(memberId) {
   const user = await api(`/admin/users/${memberId}/profile`);

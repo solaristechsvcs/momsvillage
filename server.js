@@ -9,6 +9,7 @@ import { randomBytes, timingSafeEqual } from 'node:crypto';
 import { readFile,access } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { text, id, price } from './validation.js';
+import { authColumns, updatePassword } from './passwords.js';
 import { socialRouter } from './social.js';
 import { verificationSettings } from './verification-utils.js';
 import { VerificationService } from './verification-service.js';
@@ -68,16 +69,17 @@ const publicUser = user => ({ id: user.id, name: user.name, city: user.city, bio
 const fail = (status, message) => { throw Object.assign(new Error(message), { status }); };
 const requireAccount = async (req, res, next) => {
   if (!req.session.userId) return res.status(401).json({ error: 'Please sign in.' });
-  const [user] = await query(`SELECT u.*,EXISTS(SELECT 1 FROM member_verifications own_check WHERE own_check.user_id=u.id AND own_check.current_attempt_id IS NOT NULL) AS has_verification_data,a.status AS membership_status,${badgeColumns()} FROM users u LEFT JOIN membership_applications a ON a.user_id=u.id WHERE u.id=?`, [req.session.userId]);
-  if (!user) return res.status(401).json({ error: 'Please sign in.' });
+  const [user] = await query(`SELECT u.*,${authColumns()},EXISTS(SELECT 1 FROM member_verifications own_check WHERE own_check.user_id=u.id AND own_check.current_attempt_id IS NOT NULL) AS has_verification_data,a.status AS membership_status,${badgeColumns()} FROM users u LEFT JOIN membership_applications a ON a.user_id=u.id WHERE u.id=?`, [req.session.userId]);
+  if (!user || (req.session.authVersion ?? 0)!==user.auth_version) { req.session.destroy(()=>{}); return res.status(401).json({error:'Please sign in again.'}); }
   req.user = user; req.isAdmin = isAdmin(user); next();
 };
 const requireApproved = (req, res, next) => membershipStatus(req.user) === 'approved' ? next() : res.status(403).json({ error: 'Approved membership is required.', code: 'MEMBERSHIP_REQUIRED', membership_status: membershipStatus(req.user) });
 const requireAdmin = (req, res, next) => req.isAdmin ? next() : res.status(403).json({ error: 'Administrator access required.' });
 app.get('/api/session', async (req, res) => {
   req.session.csrf ??= randomBytes(32).toString('hex');
-  const [user] = req.session.userId ? await query(`SELECT u.*,EXISTS(SELECT 1 FROM member_verifications own_check WHERE own_check.user_id=u.id AND own_check.current_attempt_id IS NOT NULL) AS has_verification_data,a.status AS membership_status,${badgeColumns()} FROM users u LEFT JOIN membership_applications a ON a.user_id=u.id WHERE u.id=?`, [req.session.userId]) : [];
-  res.json({ csrf: req.session.csrf, user: user ? { ...publicUser(user), email: user.email, admin: isAdmin(user), membership_status: membershipStatus(user), has_verification_data: !!user.has_verification_data } : null, membership_policy: { ...membershipPolicy, invite_only: config.membership?.inviteOnly === true } });
+  const [user] = req.session.userId ? await query(`SELECT u.*,${authColumns()},EXISTS(SELECT 1 FROM member_verifications own_check WHERE own_check.user_id=u.id AND own_check.current_attempt_id IS NOT NULL) AS has_verification_data,a.status AS membership_status,${badgeColumns()} FROM users u LEFT JOIN membership_applications a ON a.user_id=u.id WHERE u.id=?`, [req.session.userId]) : [];
+  if(user && (req.session.authVersion ?? 0)!==user.auth_version) { await new Promise((resolve,reject)=>req.session.regenerate(err=>err?reject(err):resolve())); req.session.csrf=randomBytes(32).toString('hex'); return res.json({csrf:req.session.csrf,user:null}); }
+  res.json({ csrf: req.session.csrf, user: user ? { ...publicUser(user), email: user.email, admin: isAdmin(user), membership_status: membershipStatus(user), has_verification_data: !!user.has_verification_data, must_change_password: !!user.must_change_password } : null, membership_policy: { ...membershipPolicy, invite_only: config.membership?.inviteOnly === true } });
 });
 app.use('/api', (req, res, next) => {
   if (['GET', 'HEAD', 'OPTIONS'].includes(req.method)) return next();
@@ -86,9 +88,9 @@ app.use('/api', (req, res, next) => {
   next();
 });
 const authLimit = rateLimit({ windowMs: 15 * 60000, limit: 20, standardHeaders: 'draft-8', legacyHeaders: false });
-async function signIn(req, userId) {
+async function signIn(req, userId, authVersion=0) {
   await new Promise((resolve, reject) => req.session.regenerate(err => err ? reject(err) : resolve()));
-  req.session.userId = userId; req.session.csrf = randomBytes(32).toString('hex');
+  req.session.userId = userId; req.session.authVersion = authVersion; req.session.csrf = randomBytes(32).toString('hex');
   await new Promise((resolve, reject) => req.session.save(err => err ? reject(err) : resolve()));
 }
 app.post('/api/register', authLimit, async (req, res) => {
@@ -106,14 +108,26 @@ app.post('/api/register', authLimit, async (req, res) => {
   await signIn(req, userId); res.status(201).json({ ok: true });
 });
 app.post('/api/login', authLimit, async (req, res) => {
-  const email = text(req.body.email, 254).toLowerCase(), password = text(req.body.password, 200);
-  const [user] = await query('SELECT * FROM users WHERE email=?', [email]);
+  const email = text(req.body.email, 254).toLowerCase(), password = typeof req.body.password==='string' ? req.body.password : '';
+  if(!password || Buffer.byteLength(password)>200) fail(400,'Enter your password.');
+  const [user] = await query(`SELECT u.*,${authColumns()} FROM users u WHERE email=?`, [email]);
   const valid = await bcrypt.compare(password, user?.password ?? '$2b$12$R9h/cIPz0gi.URNNX3kh2OPST9/PgBkqquzi.Ss7KIUgO2t0jWMUW');
   if (!user || !valid) fail(401, 'Incorrect email or password, or account unavailable.');
-  await signIn(req, user.id); res.json({ ok: true });
+  if(user.must_change_password && (!user.password_expires_at || new Date(user.password_expires_at)<=new Date())) fail(401,'Your temporary password has expired. Contact an administrator.');
+  await signIn(req,user.id,user.auth_version); res.json({ ok: true });
 });
 app.post('/api/logout', (req, res, next) => req.session.destroy(err => { if (err) return next(err); res.clearCookie('mv.sid'); res.json({ ok: true }); }));
 app.use('/api', requireAccount);
+const passwordLimit=rateLimit({windowMs:15*60000,limit:10,keyGenerator:req=>String(req.user.id),standardHeaders:'draft-8',legacyHeaders:false});
+app.post('/api/password/change',passwordLimit,async(req,res)=>{
+ const version=await updatePassword(db,{actorId:req.user.id,targetId:req.user.id,actorVersion:req.session.authVersion ?? 0,currentPassword:req.body.current_password,newPassword:req.body.new_password});
+ await signIn(req,req.user.id,version);res.json({ok:true});
+});
+app.use('/api',(req,res,next)=>req.user.must_change_password ? res.status(403).json({error:'Change your temporary password before continuing.',code:'PASSWORD_CHANGE_REQUIRED'}) : next());
+app.post('/api/admin/users/:id/password',requireApproved,requireAdmin,passwordLimit,async(req,res)=>{
+ await updatePassword(db,{actorId:req.user.id,targetId:id(req.params.id),actorVersion:req.session.authVersion ?? 0,currentPassword:req.body.current_password,newPassword:req.body.temporary_password,reset:true});
+ res.json({ok:true,expires_in_hours:24});
+});
 app.use('/api', verificationRouter({ service:verificationService,requireApproved,requireAdmin }));
 app.use('/api', membershipRouter({ db, query, config, fail, requireApproved, requireAdmin }));
 app.use('/api', requireApproved);

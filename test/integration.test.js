@@ -386,6 +386,42 @@ test('MySQL-backed community workflows and access controls', { skip: process.env
 
     assert.equal((await a('/verification')).enabled,false);
     await a('/verification/attempts','POST',{consent:true},503);
+
+    // Password resets revoke sessions and require a new password before any community API.
+    const resetPath='/admin/users/'+userB.id+'/password';
+    await a(resetPath,'POST',{temporary_password:'Temporary-pass-123',current_password:'a-long-password-123'},403);
+    await admin(resetPath,'POST',{temporary_password:'short',current_password:'a-long-password-123'},400);
+    await admin(resetPath,'POST',{temporary_password:'Temporary-pass-123',current_password:'incorrect-password'},403);
+    await admin(resetPath,'POST',{temporary_password:'Temporary-pass-123',current_password:'a-long-password-123'},403,false);
+    await admin(resetPath,'POST',{temporary_password:'Temporary-pass-123',current_password:'a-long-password-123'});
+    await b('/posts','GET',undefined,401);
+    const recovered=client();await recovered('/session');
+    await recovered('/login','POST',{email:'b@example.com',password:'a-long-password-123'},401);
+    await recovered('/login','POST',{email:'b@example.com',password:'Temporary-pass-123'});
+    assert.equal((await recovered('/session')).user.must_change_password,true);
+    await recovered('/posts','GET',undefined,403);
+    await recovered('/admin','GET',undefined,403);
+    await recovered('/verification','GET',undefined,403);
+    await recovered('/password/change','POST',{current_password:'wrong-password',new_password:'Final-password-123'},403);
+    await recovered('/password/change','POST',{current_password:'Temporary-pass-123',new_password:'Temporary-pass-123'},400);
+    await recovered('/password/change','POST',{current_password:'Temporary-pass-123',new_password:'Final-password-123'});
+    assert.equal((await recovered('/session')).user.must_change_password,false);
+    await recovered('/posts');
+    await recovered('/logout','POST');await recovered('/session');
+    await recovered('/login','POST',{email:'b@example.com',password:'Temporary-pass-123'},401);
+    await recovered('/login','POST',{email:'b@example.com',password:'Final-password-123'});
+    const adminId=(await admin('/session')).user.id;
+    await admin('/admin/users/'+adminId+'/password','POST',{temporary_password:'Temporary-pass-123',current_password:'a-long-password-123'},400);
+    await admin(resetPath,'POST',{temporary_password:'Expiry-password-123',current_password:'a-long-password-123'});
+    const authDb=await mysql.createConnection({host:'127.0.0.1',port:3306,user:'root',password:'integration-only-password',database:'momsvillage_test'});
+    try {
+      await authDb.execute('UPDATE password_state SET expires_at=DATE_SUB(UTC_TIMESTAMP(),INTERVAL 1 HOUR) WHERE user_id=?',[userB.id]);
+      await recovered('/session');await recovered('/login','POST',{email:'b@example.com',password:'Expiry-password-123'},401);
+      const [[audit]]=await authDb.execute("SELECT COUNT(*) AS total FROM admin_audit WHERE target_id=? AND action='password_reset'",[userB.id]);
+      assert.equal(Number(audit.total),2);
+      const [[stored]]=await authDb.execute('SELECT password FROM users WHERE id=?',[userB.id]);
+      assert.ok(stored.password.startsWith('$2'));assert.notEqual(stored.password,'Expiry-password-123');
+    } finally {await authDb.end();}
     const cameraPage=await fetch(base+'/verification-check.html');
     assert.equal(cameraPage.status,200);assert.ok(cameraPage.headers.get('content-security-policy').includes('wasm-unsafe-eval'));
     const homepage=await fetch(base+'/');assert.equal(homepage.headers.get('content-security-policy').includes('wasm-unsafe-eval'),false);

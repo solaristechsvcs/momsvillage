@@ -1,5 +1,8 @@
 # Moms Village
 
+Version 0.5.1: Administration now offers Set temporary password. Confirm your administrator password, choose a temporary password (12 characters minimum, 72 UTF-8 bytes maximum), and share it privately after confirming account ownership. It expires after 24 hours and must be changed before community access. Existing sessions are invalidated. Only hashes are stored; audit entries contain no passwords. Resetting does not approve or restore membership. Administrators must ask another administrator to reset their own account. Update files and restart; the password_state table is created automatically.
+
+
 A community for moms: profiles, a discussion feed, local groups, events, a marketplace, friend requests, private messaging and notifications. Includes direct photo uploads, member search, contact blocking, and moderation.
 
 ## Upgrading an existing installation to 0.2
