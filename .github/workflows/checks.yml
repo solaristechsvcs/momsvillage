@@ -26,8 +26,10 @@ jobs:
         with:
           node-version: 22
       - run: npm install --no-audit --no-fund
+      - run: npx playwright install --with-deps chromium
       - run: npm run check
       - run: timeout 100s npm test
         env:
           MV_INTEGRATION: '1'
           MV_UI: '1'
+          MV_BROWSER: '1'

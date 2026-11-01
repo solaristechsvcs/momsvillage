@@ -40,7 +40,7 @@ function dockHint(kind,data){
 }
 async function dockOpen(id){
  dockMount();const gen=dockGeneration;
- if(dockChats.has(id)){const c=dockChats.get(id);c.expanded=true;c.root.classList.remove('minimized');c.root.querySelector('.dock-title').setAttribute('aria-expanded','true');c.root.querySelector('.dock-new').hidden=true;chatMount();await dockSync(id);return;}
+ if(dockChats.has(id)){const c=dockChats.get(id);c.expanded=true;c.root.classList.remove('minimized');c.root.querySelector('.dock-title').setAttribute('aria-expanded','true');c.root.querySelector('.dock-new').hidden=true;dockMobileFocus(c);chatMount();await dockSync(id);return;}
  if(dockChats.size>=3){notice('Close a chat window before opening another. Up to three conversations can stay open.');return;}
  try{
   const t=await api('/messages/'+id);
@@ -49,7 +49,7 @@ async function dockOpen(id){
   const root=document.createElement('section');root.className='dock-window';root.dataset.dockPeer=String(id);root.setAttribute('aria-label','Chat with '+t.peer.name);
   root.innerHTML=`<div class="dock-heading"><button type="button" class="dock-title" data-dock-action="expand" aria-expanded="true">${esc(t.peer.name)} <span class="dock-new" hidden>● New</span></button><button type="button" data-dock-action="minimize" aria-label="Minimize chat with ${esc(t.peer.name)}">−</button><button type="button" data-dock-action="close" aria-label="Close chat with ${esc(t.peer.name)}">×</button></div><div class="dock-window-body"><p class="dock-connection"></p><p class="dock-presence"></p><div class="dock-messages" role="log" aria-live="polite" aria-label="Conversation messages">${t.messages.map(m=>chatMessageMarkup(m,t.peer)).join('')||'<p data-chat-empty>Say hello.</p>'}</div><p class="dock-typing" role="status"></p><form data-dock-form><label for="dock-message-${id}">Your message</label><textarea id="dock-message-${id}" name="body" rows="2" maxlength="4000" required></textarea><p class="form-error" role="alert"></p><button type="submit">Send</button></form><div class="dock-controls"><button type="button" data-dock-action="history">History</button><button type="button" data-dock-action="block">Block</button></div></div>`;
   dockChats.set(id,{root,thread:t,expanded:true,busy:false,again:false});
-  document.querySelector('.dock-windows').append(root);dockConnection();
+  document.querySelector('.dock-windows').append(root);dockMobileFocus(dockChats.get(id));dockConnection();
   if(!t.can_send)dockAccess(id);
   const list=root.querySelector('.dock-messages');list.scrollTop=list.scrollHeight;
   chatMount();await refreshUnread();root.querySelector('textarea').focus();
@@ -90,7 +90,7 @@ document.addEventListener('click',async event=>{
  if(action==='open')await dockOpen(Number(b.dataset.id));
  if(c&&(action==='minimize'||action==='expand')){
   c.expanded=action==='expand'?!c.expanded:false;c.root.classList.toggle('minimized',!c.expanded);c.root.querySelector('.dock-title').setAttribute('aria-expanded',String(c.expanded));
-  chatMount();if(c.expanded)await dockSync(id);
+  dockMobileFocus(c);chatMount();if(c.expanded)await dockSync(id);
  }
  if(c&&action==='close'){clearTimeout(c.typingTimer);c.root.remove();dockChats.delete(id);chatMount();}
  if(c&&action==='history'){location.hash='messages/'+id;}
@@ -124,3 +124,18 @@ document.addEventListener('submit',async event=>{
 setInterval(()=>{if(dockListOpen&&!document.hidden)void dockInbox();},15000);
 window.addEventListener('online',()=>void dockSync());
 document.addEventListener('visibilitychange',()=>{if(!document.hidden)void dockSync();});
+
+function dockMobileFocus(selected){
+ if(!window.matchMedia?.('(max-width:700px)').matches||!selected?.expanded)return;
+ for(const c of dockChats.values())if(c!==selected&&c.expanded){c.expanded=false;c.root.classList.add('minimized');c.root.querySelector('.dock-title').setAttribute('aria-expanded','false');}
+}
+function dockViewport(){
+ const viewport=window.visualViewport;
+ document.documentElement.style.setProperty('--mobile-height',(viewport?.height??window.innerHeight)+'px');
+ document.documentElement.style.setProperty('--keyboard-inset',Math.max(0,window.innerHeight-(viewport?.height??window.innerHeight)-(viewport?.offsetTop??0))+'px');
+ const expanded=[...dockChats.values()].filter(c=>c.expanded);if(expanded.length>1){dockMobileFocus(expanded.at(-1));chatMount();}
+}
+window.visualViewport?.addEventListener('resize',dockViewport);
+window.visualViewport?.addEventListener('scroll',dockViewport);
+window.addEventListener('resize',dockViewport);
+dockViewport();
