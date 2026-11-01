@@ -39,7 +39,15 @@ membership: { inviteOnly: true },
 
 Existing configuration files work without this key. Existing approved members retain access when enabling invitation-only applications; a new approval requires an attached invitation. Bootstrap administrators are exempt. Applicants with an existing attached invitation can resubmit without a new code.
 
-Community lists and review queues are bounded as documented below (up to 200 applications/invitations per admin view). No email notifications or automated liveness service are included in this phase; applicants use Check application status to see decisions.
+Community lists and review queues are bounded as documented below (up to 200 applications/invitations per admin view). Email notifications are not included; optional liveness is configured separately as described above; applicants use Check application status to see decisions.
+
+## Optional AI verification (0.5.0)
+
+Approved members may complete an optional AWS Rekognition Face Liveness check. Successful high-confidence checks grant a Verified badge; flagged attempts enter a private review queue. No community feature is restricted by Verified status in this release.
+
+Verification is disabled by default until AWS and a unique encryption key are configured. Install dependencies to build the camera component, preserve config.js, and restart. New tables are created automatically. Review images are encrypted, expire, and are cleared after decisions or withdrawal. No gender or parenthood inference is performed.
+
+See [the setup guide](docs/verification.md) for configuration, AWS permissions, consent/retention, testing and future feature-gating guidance. Existing configuration remains compatible with verification unavailable until setup is complete.
 
 ## Requirements
 
@@ -70,7 +78,7 @@ For Docker: `docker build -t momsvillage .`, then `docker run -d --name momsvill
 
 The new social navigation is visible after signing in; the public landing page stays similar. Check `/version` to identify the running application release. Version 0.2.1 adds versioned CSS/JavaScript URLs, disables browser/CDN caching of application assets at the origin, and prints the release in the startup log.
 
-After copying files, install dependencies and fully restart Wisp. The current log should say `Moms Village v0.4.0 listening on port ...`. If `/version` is missing or reports an older version, check the running container, application directory and Cloudflare Tunnel destination. If the origin is current but the public domain is stale, purge the site's Cloudflare cache and ensure custom cache rules respect origin headers or bypass caching for this app, particularly `/api/*` and `/version`. Origin headers cannot invalidate content that a proxy already cached or override a proxy configured to ignore them.
+After copying files, install dependencies and fully restart Wisp. The current log should say `Moms Village v0.5.0 listening on port ...`. If `/version` is missing or reports an older version, check the running container, application directory and Cloudflare Tunnel destination. If the origin is current but the public domain is stale, purge the site's Cloudflare cache and ensure custom cache rules respect origin headers or bypass caching for this app, particularly `/api/*` and `/version`. Origin headers cannot invalidate content that a proxy already cached or override a proxy configured to ignore them.
 
 ## Administrator roles (0.3)
 

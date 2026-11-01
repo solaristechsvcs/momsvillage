@@ -1,8 +1,9 @@
+import { verificationSql } from './verification-utils.js';
 export const assignableBadges = { developer: 'Developer', founding_member: 'Founding Member', tester: 'Tester' };
 
 // Fixed internal aliases only: never pass request data to this SQL fragment.
 export function badgeColumns(alias = 'u') {
-  return `${alias}.is_admin AS staff_badge, ` + Object.keys(assignableBadges).map(badge => `EXISTS(SELECT 1 FROM user_badges ub WHERE ub.user_id=${alias}.id AND ub.badge='${badge}') AS ${badge}_badge`).join(', ');
+  return `${alias}.is_admin AS staff_badge, ${verificationSql(alias)} AS verified_member, ` + Object.keys(assignableBadges).map(badge => `EXISTS(SELECT 1 FROM user_badges ub WHERE ub.user_id=${alias}.id AND ub.badge='${badge}') AS ${badge}_badge`).join(', ');
 }
 
 export async function initializeBadgeStorage(db, database) {

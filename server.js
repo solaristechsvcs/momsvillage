@@ -6,10 +6,13 @@ import bcrypt from 'bcryptjs';
 import helmet from 'helmet';
 import { rateLimit } from 'express-rate-limit';
 import { randomBytes, timingSafeEqual } from 'node:crypto';
-import { readFile } from 'node:fs/promises';
+import { readFile,access } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { text, id, price } from './validation.js';
 import { socialRouter } from './social.js';
+import { verificationSettings } from './verification-utils.js';
+import { VerificationService } from './verification-service.js';
+import { verificationRouter } from './verification.js';
 import { membershipRouter, initializeMembership, registerMembership, membershipStatus, membershipPolicy, approvedMemberSql } from './membership.js';
 import { changeMemberAccess, initializeAdminRoles } from './admin.js';
 import { badgeColumns, initializeBadgeStorage, assignableBadges } from './badges.js';
@@ -26,14 +29,32 @@ const socialSchema = await readFile(new URL('./social-schema.sql', import.meta.u
 for (const statement of socialSchema.split(';').map(s => s.trim()).filter(Boolean)) await db.query(statement);
 const membershipSchema = await readFile(new URL('./membership-schema.sql', import.meta.url), 'utf8');
 for (const statement of membershipSchema.split(';').map(s => s.trim()).filter(Boolean)) await db.query(statement);
+const verificationSchema = await readFile(new URL('./verification-schema.sql', import.meta.url), 'utf8');
+for (const statement of verificationSchema.split(';').map(s => s.trim()).filter(Boolean)) await db.query(statement);
 await initializeBadgeStorage(db, config.mysql.database);
 await initializeAdminRoles(db, config);
 await initializeMembership(db);
 const query = async (sql, args = []) => (await db.execute(sql, args))[0];
+const verificationConfig = verificationSettings(config);
+const cameraBundleReady = await access(new URL('./public/verification-widget.js',import.meta.url)).then(()=>true,()=>false);
+if(verificationConfig.ready && !cameraBundleReady) { verificationConfig.ready=false; console.warn('Optional verification requires npm run build:verification.'); }
+const verificationProvider = verificationConfig.ready ? (await import('./liveness-provider.js')).awsLivenessProvider(verificationConfig) : null;
+const verificationService = new VerificationService(db,verificationConfig,verificationProvider);
+await verificationService.purge();
+const verificationCleanup = setInterval(()=>verificationService.purge().catch(()=>console.warn('Verification evidence cleanup delayed.')),15*60000);
+verificationCleanup.unref();
 const app = express();
 app.disable('x-powered-by');
 if (config.trustProxy) app.set('trust proxy', config.trustProxy);
-app.use(helmet({ contentSecurityPolicy: { directives: { imgSrc: ["'self'", 'https:', 'data:'], scriptSrc: ["'self'"], styleSrc: ["'self'"], upgradeInsecureRequests: config.secureCookies ? [] : null } } }));
+const standardSecurity = helmet({ contentSecurityPolicy: { directives: { imgSrc: ["'self'",'https:','data:'],scriptSrc:["'self'"],styleSrc:["'self'"],upgradeInsecureRequests:config.secureCookies ? [] : null } } });
+const cameraRegion = /^[a-z]{2}(?:-[a-z]+)+-\d+$/.test(verificationConfig.region) ? verificationConfig.region : 'us-east-1';
+const cameraSecurity = helmet({ contentSecurityPolicy: { directives: {
+  imgSrc:["'self'",'data:','blob:'],scriptSrc:["'self'","'wasm-unsafe-eval'",'https://cdn.liveness.rekognition.amazonaws.com'],styleSrc:["'self'","'unsafe-inline'"],
+  connectSrc:["'self'",'https://cdn.liveness.rekognition.amazonaws.com','https://rekognition-streaming.'+cameraRegion+'.amazonaws.com','wss://rekognition-streaming.'+cameraRegion+'.amazonaws.com'],
+  workerSrc:["'self'",'blob:'],upgradeInsecureRequests:config.secureCookies ? [] : null
+} } });
+app.use((req,res,next)=>(req.path==='/verification-check.html' ? cameraSecurity : standardSecurity)(req,res,next));
+app.use((req,res,next)=>{if(req.path==='/verification-check.html') res.set('Permissions-Policy','camera=(self), microphone=()');next();});
 app.use(express.json({ limit: '32kb' }));
 const MySQLStore = MySQLStoreFactory(session);
 const sessionStore = new MySQLStore({ ...config.mysql, createDatabaseTable: true });
@@ -43,11 +64,11 @@ app.use('/api', rateLimit({ windowMs: 60000, limit: 180, standardHeaders: 'draft
 app.use('/api', (req, res, next) => { res.set('Cache-Control', 'no-store'); next(); });
 const adminEmail = email => (config.adminEmails ?? []).map(e => e.toLowerCase()).includes(email.toLowerCase());
 const isAdmin = user => !!user.is_admin && membershipStatus(user) === 'approved';
-const publicUser = user => ({ id: user.id, name: user.name, city: user.city, bio: user.bio, avatar: user.avatar, created_at: user.created_at, staff_badge: !!user.is_admin, ...Object.fromEntries(Object.keys(assignableBadges).map(badge => [`${badge}_badge`, !!user[`${badge}_badge`]])) });
+const publicUser = user => ({ id: user.id, name: user.name, city: user.city, bio: user.bio, avatar: user.avatar, created_at: user.created_at, staff_badge: !!user.is_admin, verified_member: !!user.verified_member, ...Object.fromEntries(Object.keys(assignableBadges).map(badge => [`${badge}_badge`, !!user[`${badge}_badge`]])) });
 const fail = (status, message) => { throw Object.assign(new Error(message), { status }); };
 const requireAccount = async (req, res, next) => {
   if (!req.session.userId) return res.status(401).json({ error: 'Please sign in.' });
-  const [user] = await query(`SELECT u.*,a.status AS membership_status,${badgeColumns()} FROM users u LEFT JOIN membership_applications a ON a.user_id=u.id WHERE u.id=?`, [req.session.userId]);
+  const [user] = await query(`SELECT u.*,EXISTS(SELECT 1 FROM member_verifications own_check WHERE own_check.user_id=u.id AND own_check.current_attempt_id IS NOT NULL) AS has_verification_data,a.status AS membership_status,${badgeColumns()} FROM users u LEFT JOIN membership_applications a ON a.user_id=u.id WHERE u.id=?`, [req.session.userId]);
   if (!user) return res.status(401).json({ error: 'Please sign in.' });
   req.user = user; req.isAdmin = isAdmin(user); next();
 };
@@ -55,8 +76,8 @@ const requireApproved = (req, res, next) => membershipStatus(req.user) === 'appr
 const requireAdmin = (req, res, next) => req.isAdmin ? next() : res.status(403).json({ error: 'Administrator access required.' });
 app.get('/api/session', async (req, res) => {
   req.session.csrf ??= randomBytes(32).toString('hex');
-  const [user] = req.session.userId ? await query(`SELECT u.*,a.status AS membership_status,${badgeColumns()} FROM users u LEFT JOIN membership_applications a ON a.user_id=u.id WHERE u.id=?`, [req.session.userId]) : [];
-  res.json({ csrf: req.session.csrf, user: user ? { ...publicUser(user), email: user.email, admin: isAdmin(user), membership_status: membershipStatus(user) } : null, membership_policy: { ...membershipPolicy, invite_only: config.membership?.inviteOnly === true } });
+  const [user] = req.session.userId ? await query(`SELECT u.*,EXISTS(SELECT 1 FROM member_verifications own_check WHERE own_check.user_id=u.id AND own_check.current_attempt_id IS NOT NULL) AS has_verification_data,a.status AS membership_status,${badgeColumns()} FROM users u LEFT JOIN membership_applications a ON a.user_id=u.id WHERE u.id=?`, [req.session.userId]) : [];
+  res.json({ csrf: req.session.csrf, user: user ? { ...publicUser(user), email: user.email, admin: isAdmin(user), membership_status: membershipStatus(user), has_verification_data: !!user.has_verification_data } : null, membership_policy: { ...membershipPolicy, invite_only: config.membership?.inviteOnly === true } });
 });
 app.use('/api', (req, res, next) => {
   if (['GET', 'HEAD', 'OPTIONS'].includes(req.method)) return next();
@@ -93,6 +114,7 @@ app.post('/api/login', authLimit, async (req, res) => {
 });
 app.post('/api/logout', (req, res, next) => req.session.destroy(err => { if (err) return next(err); res.clearCookie('mv.sid'); res.json({ ok: true }); }));
 app.use('/api', requireAccount);
+app.use('/api', verificationRouter({ service:verificationService,requireApproved,requireAdmin }));
 app.use('/api', membershipRouter({ db, query, config, fail, requireApproved, requireAdmin }));
 app.use('/api', requireApproved);
 const social = await socialRouter({ db, query, config, fail });
@@ -282,5 +304,5 @@ app.use((error, req, res, next) => {
 });
 await sessionStore.onReady();
 const server = app.listen(config.port ?? 3014, config.host ?? '0.0.0.0', () => console.log(`Moms Village v${version} listening on port ${config.port ?? 3014}`));
-async function shutdown() { server.close(async () => { await db.end(); await sessionStore.close(); process.exit(0); }); }
+async function shutdown() { clearInterval(verificationCleanup); server.close(async () => { await db.end(); await sessionStore.close(); process.exit(0); }); }
 process.on('SIGTERM', shutdown); process.on('SIGINT', shutdown);

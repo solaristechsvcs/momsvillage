@@ -1,6 +1,15 @@
 export default {
   host: '0.0.0.0', port: 3014,
   publicUrl: 'http://localhost:3014',
+  verification: {
+    enabled: false, // Enable after configuring AWS and testing the camera flow over HTTPS.
+    region: 'us-east-1',
+    browserRoleArn: '', // Separate IAM role restricted to Rekognition StartFaceLivenessSession.
+    accessKeyId: '', secretAccessKey: '', // Or use an AWS workload role/default SDK credential chain.
+    encryptionKey: '', // Unique 32-byte key as 64 hex characters; keep it secret and stable.
+    autoApproveThreshold: 95, autoApprove: true,
+    retentionHours: 72
+  },
   membership: { inviteOnly: false }, // true requires an invitation to apply; all applicants still need review.
   uploadsDirectory: './uploads', // Persistent writable directory. Existing configs default to this.
   sessionSecret: 'REPLACE_WITH_A_UNIQUE_RANDOM_SECRET_AT_LEAST_32_CHARACTERS',

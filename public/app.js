@@ -2,7 +2,7 @@ const $ = s => document.querySelector(s);
 const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 let unread = { messages: 0, notifications: 0 };
 let me = null, csrf = '', page = 'feed', group = null, records = [], generation = 0;
-const labels = { feed: ['⌂', 'Village feed'], members: ['\u263a', 'Find moms'], friends: ['\u2661', 'Friends'], messages: ['\u2709', 'Messages'], notifications: ['\u2667', 'Notifications'], invitations: ['+', 'Invitations'], applications: ['?', 'Review applications'], groups: ['♧', 'Local groups'], events: ['☷', 'Events'], marketplace: ['◇', 'Marketplace'], profile: ['○', 'My profile'], admin: ['⚙', 'Administration'] };
+const labels = { feed: ['⌂', 'Village feed'], members: ['\u263a', 'Find moms'], friends: ['\u2661', 'Friends'], messages: ['\u2709', 'Messages'], notifications: ['\u2667', 'Notifications'], verification: ['+', 'Verification'], 'verification-review': ['?', 'Verification review'], invitations: ['+', 'Invitations'], applications: ['?', 'Review applications'], groups: ['♧', 'Local groups'], events: ['☷', 'Events'], marketplace: ['◇', 'Marketplace'], profile: ['○', 'My profile'], admin: ['⚙', 'Administration'] };
 const avatar = (user, size = '') => user.avatar ? `<img class="avatar ${size}" src="${esc(user.avatar)}" referrerpolicy="no-referrer" alt="${esc(user.name)}">` : `<span class="avatar ${size}" aria-hidden="true">${esc(user.name?.slice(0, 1).toUpperCase() || 'M')}</span>`;
 const logo = '<a class="logo" href="#feed"><span class="logo-mark">♧</span>Moms Village</a>';
 const date = value => new Date(value).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
@@ -34,7 +34,7 @@ function auth(register) {
 }
 function guidelines() { modal('A kinder corner of the internet.', '<p>Be respectful, supportive, and honest. Moms Village is for adults aged 18 and older. Harassment, hate, scams, illegal items, and unsafe content are not welcome.</p><p>Protect your privacy and your children’s privacy. Avoid sharing home addresses, school details, and other sensitive information. Community profiles and content are visible only to approved members; local groups are open to approved members. Applicants must confirm that they meet the mothers-only membership policy. Applications are reviewed by administrators.</p><p>Report content that breaks these guidelines. Staff can remove content and suspend accounts. Meet marketplace contacts in public and use your own judgment. Marketplace listings are classifieds; Moms Village does not process payments or guarantee transactions.</p><p>Choose what you share. Displaying an external image loads it from its host, which may receive your IP address. Community discussions are peer support and do not replace professional advice.</p>'); }
 function shell() {
-  $('#app').innerHTML = `<header>${logo}<span class="header-note">Your village, wherever you are.</span><div class="account"><span class="muted">Hi, ${esc(me.name.split(' ')[0])}</span><a href="#profile" aria-label="My profile">${avatar(me)}</a><button class="subtle" data-action="logout">Sign out</button></div></header><div class="layout"><aside class="sidebar"><nav aria-label="Main navigation">${Object.entries(labels).filter(([key]) => !['admin','applications'].includes(key) || me.admin).map(([key, [icon, label]]) => `<a class="nav-link ${page === key || (page === 'group' && key === 'groups') ? 'active' : ''}" href="#${key}"><span class="nav-icon">${icon}</span>${label}${['messages','notifications'].includes(key) ? `<span class="badge" data-count="${key}" ${unread[key] ? '' : 'hidden'}>${unread[key] || ''}</span>` : ''}</a>`).join('')}</nav><div class="side-card"><span>❋</span><h3>A little kindness<br>goes a long way.</h3><p>Every mom’s journey looks different. There’s room for yours here.</p><a href="#guidelines">Our community guidelines ↗</a></div></aside><main id="main"><p class="loading">Gathering the village…</p></main><aside class="rail"><div class="card"><span class="pill">A NOTE FOR YOUR DAY</span><h3>You’re doing better<br>than you think.</h3><p>Some days, showing up is the big win. We’re glad you’re here.</p></div><div class="card"><h3>Make room for connection</h3><p>Find a group close to home or create a gathering of your own.</p><a href="#groups"><button class="secondary full">Explore local groups ↗</button></a></div><div class="card"><h3>Village values</h3><div class="rail-item"><span>♡</span><div><strong>Lead with kindness</strong><small>A supportive space for every chapter.</small></div></div><div class="rail-item"><span>♧</span><div><strong>Share at your own pace</strong><small>You choose what to share.</small></div></div><div class="rail-item"><span>☀</span><div><strong>Help each other grow</strong><small>Small gestures make a difference.</small></div></div></div><div class="footer-note">Moms Village © ${new Date().getFullYear()}<br><a href="#guidelines">Community guidelines</a></div></aside></div>`;
+  $('#app').innerHTML = `<header>${logo}<span class="header-note">Your village, wherever you are.</span><div class="account"><span class="muted">Hi, ${esc(me.name.split(' ')[0])}</span><a href="#profile" aria-label="My profile">${avatar(me)}</a><button class="subtle" data-action="logout">Sign out</button></div></header><div class="layout"><aside class="sidebar"><nav aria-label="Main navigation">${Object.entries(labels).filter(([key]) => !['admin','applications','verification-review'].includes(key) || me.admin).map(([key, [icon, label]]) => `<a class="nav-link ${page === key || (page === 'group' && key === 'groups') ? 'active' : ''}" href="#${key}"><span class="nav-icon">${icon}</span>${label}${['messages','notifications'].includes(key) ? `<span class="badge" data-count="${key}" ${unread[key] ? '' : 'hidden'}>${unread[key] || ''}</span>` : ''}</a>`).join('')}</nav><div class="side-card"><span>❋</span><h3>A little kindness<br>goes a long way.</h3><p>Every mom’s journey looks different. There’s room for yours here.</p><a href="#guidelines">Our community guidelines ↗</a></div></aside><main id="main"><p class="loading">Gathering the village…</p></main><aside class="rail"><div class="card"><span class="pill">A NOTE FOR YOUR DAY</span><h3>You’re doing better<br>than you think.</h3><p>Some days, showing up is the big win. We’re glad you’re here.</p></div><div class="card"><h3>Make room for connection</h3><p>Find a group close to home or create a gathering of your own.</p><a href="#groups"><button class="secondary full">Explore local groups ↗</button></a></div><div class="card"><h3>Village values</h3><div class="rail-item"><span>♡</span><div><strong>Lead with kindness</strong><small>A supportive space for every chapter.</small></div></div><div class="rail-item"><span>♧</span><div><strong>Share at your own pace</strong><small>You choose what to share.</small></div></div><div class="rail-item"><span>☀</span><div><strong>Help each other grow</strong><small>Small gestures make a difference.</small></div></div></div><div class="footer-note">Moms Village © ${new Date().getFullYear()}<br><a href="#guidelines">Community guidelines</a></div></aside></div>`;
 }
 const heading = (title, subtitle, action, button) => `<div class="page-heading"><div><h1>${esc(title)}</h1><p class="muted">${esc(subtitle)}</p></div>${action ? `<button data-action="${action}">${esc(button)}</button>` : ''}</div>`;
 function postCard(p) {
@@ -54,7 +54,9 @@ async function load() {
   shell();
   try {
     let html = '';
-    if (['invitations','applications'].includes(page)) {
+    if (['verification','verification-review'].includes(page)) {
+      html = await verificationPage(route);
+    } else if (['invitations','applications'].includes(page)) {
       html = await membershipPage(route);
     } else if (['members', 'friends', 'messages', 'notifications'].includes(page)) {
       html = await socialPage(route);
@@ -102,6 +104,7 @@ document.addEventListener('click', async event => {
   event.preventDefault(); const { action, id, type, active } = button.dataset;
   if (socialActions.has(action)) { await handleSocialClick(button); return; }
   if (membershipActions.has(action)) { await handleMembershipClick(button); return; }
+  if (verificationActions.has(action)) { await handleVerificationClick(button); return; }
   try {
     if (action === 'close') closeModal();
     else if (action === 'login' || action === 'register') auth(action === 'register');
@@ -146,6 +149,7 @@ document.addEventListener('click', async event => {
 });
 document.addEventListener('submit', async event => {
   const f = event.target.closest('form[data-form]'); if (!f) return; event.preventDefault();
+  if (['verification-delete','verification-review','verification-revoke'].includes(f.dataset.form)) { await handleVerificationSubmit(f); return; }
   if (['membership-application','membership-review'].includes(f.dataset.form)) { await handleMembershipSubmit(f); return; }
   if (f.dataset.form === 'admin-search') {
     const hash = `admin?q=${encodeURIComponent(new FormData(f).get('q') ?? '')}`;
@@ -207,7 +211,7 @@ async function adminProfileModal(memberId) {
 
 function memberBadges(user) {
   const flag = value => value === true || value === 1;
-  return `<span class="member-badges">${flag(user.staff_badge) ? '<span class="member-badge staff" title="Administrator" aria-label="Staff administrator">Staff</span>' : ''}${flag(user.developer_badge) ? '<span class="member-badge developer" title="Assigned by an administrator">Developer</span>' : ''}${flag(user.founding_member_badge) ? '<span class="member-badge founding-member" title="Assigned by an administrator">Founding Member</span>' : ''}${flag(user.tester_badge) ? '<span class="member-badge tester" title="Assigned by an administrator">Tester</span>' : ''}</span>`;
+  return `<span class="member-badges">${flag(user.verified_member) ? '<span class="member-badge verified" title="Completed AI liveness verification or approved manual review; not proof of gender or motherhood">Verified</span>' : ''}${flag(user.staff_badge) ? '<span class="member-badge staff" title="Administrator" aria-label="Staff administrator">Staff</span>' : ''}${flag(user.developer_badge) ? '<span class="member-badge developer" title="Assigned by an administrator">Developer</span>' : ''}${flag(user.founding_member_badge) ? '<span class="member-badge founding-member" title="Assigned by an administrator">Founding Member</span>' : ''}${flag(user.tester_badge) ? '<span class="member-badge tester" title="Assigned by an administrator">Tester</span>' : ''}</span>`;
 }
 
 function extraBadgeLabel(badge) { return ({ founding_member: 'Founding Member', tester: 'Tester' })[badge] ?? 'Member'; }

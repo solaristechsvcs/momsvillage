@@ -4,3 +4,6 @@ config.js
 *.log
 .npm-cache
 uploads
+
+public/verification-widget.js
+public/verification-widget.css

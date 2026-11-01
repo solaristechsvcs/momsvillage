@@ -10,7 +10,7 @@ async function bootUI(hash, fetcher) {
   w.HTMLDialogElement.prototype.showModal = function() { this.setAttribute('open',''); };
   w.HTMLDialogElement.prototype.close = function() { this.removeAttribute('open'); };
   w.fetch = fetcher;
-  const scripts = await Promise.all(['membership-ui.js','social-ui.js','app.js'].map(f => readFile(new URL('../public/' + f,import.meta.url),'utf8')));
+  const scripts = await Promise.all(['verification-ui.js','membership-ui.js','social-ui.js','app.js'].map(f => readFile(new URL('../public/' + f,import.meta.url),'utf8')));
   w.eval(scripts.join('\n'));
   return { w, close:() => close.call(w) };
 }

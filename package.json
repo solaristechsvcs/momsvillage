@@ -1,12 +1,14 @@
 {
   "name": "momsvillage",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "private": true,
   "type": "module",
   "scripts": {
     "start": "node server.js",
     "test": "node --test",
-    "check": "node --check server.js && node --check social.js && node --check public/app.js && node --check public/social-ui.js && node --check admin.js && node --check badges.js && node --check membership.js && node --check public/membership-ui.js"
+    "check": "node --check server.js && node --check social.js && node --check public/app.js && node --check public/social-ui.js && node --check admin.js && node --check badges.js && node --check membership.js && node --check public/membership-ui.js && node --check verification-service.js && node --check verification-utils.js && node --check verification.js && node --check liveness-provider.js && node --check public/verification-ui.js",
+    "build:verification": "node scripts/build-verification.mjs",
+    "postinstall": "npm run build:verification"
   },
   "engines": {
     "node": ">=22"
@@ -20,7 +22,15 @@
     "helmet": "^8.1.0",
     "mysql2": "^3.15.0",
     "multer": "^2.0.2",
-    "sharp": "^0.34.4"
+    "sharp": "^0.34.4",
+    "@aws-sdk/client-rekognition": "^3.0.0",
+    "@aws-sdk/client-sts": "^3.0.0",
+    "@aws-amplify/ui-react-liveness": "^3.0.0",
+    "@aws-amplify/ui-react": "^6.0.0",
+    "aws-amplify": "^6.0.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "esbuild": "^0.25.0"
   },
   "devDependencies": {
     "jsdom": "^26.1.0"

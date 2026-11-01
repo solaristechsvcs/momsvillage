@@ -66,11 +66,12 @@ test('MySQL-backed community workflows and access controls', { skip: process.env
     await admin('/register', 'POST', { name: 'Admin', email: 'admin@example.com', password: 'a-long-password-123', agree: true }, 403);
     await admin('/register', 'POST', { name: 'Admin', email: 'admin@example.com', password: 'a-long-password-123', agree: true, setup_code: code }, 201);
     assert.equal((await admin('/session')).user.admin, true);
-    assert.equal(userA.membership_status, 'pending');
-    for (const path of ['/posts','/members','/members/' + userB.id,'/groups','/events','/listings','/messages','/notifications','/unread','/uploads','/invitations','/admin','/admin/membership-applications','/media/0123456789abcdef0123456789abcdef.webp']) await a(path,'GET',undefined,403);
+    assert.equal(userA.membership_status, 'pending'); assert.equal(userA.verified_member,false);
+    for (const path of ['/posts','/members','/members/' + userB.id,'/groups','/events','/listings','/messages','/notifications','/unread','/uploads','/invitations','/admin','/admin/membership-applications','/admin/verification','/media/0123456789abcdef0123456789abcdef.webp']) await a(path,'GET',undefined,403);
     await a('/posts','POST',{ body:'Unauthorized post' },403);
     await a('/uploads','POST',{},403);
     await a('/invitations','POST',{},403);
+    await a('/verification/attempts','POST',{consent:true},403);
     await approveMember(a,userA.id); await approveMember(b,userB.id);
 
     await b('/admin', 'GET', undefined, 403);
@@ -233,8 +234,8 @@ test('MySQL-backed community workflows and access controls', { skip: process.env
     await b('/admin', 'GET', undefined, 403);
     const badgeProfile = await a(`/members/${userB.id}`);
     assert.equal(badgeProfile.developer_badge, 1); assert.equal(badgeProfile.email, undefined);
-    await a('/profile', 'PATCH', { name: 'Mom A', city: 'Austin', bio: 'No badge spoofing', avatar: '', staff_badge: true, developer_badge: true, is_admin: true });
-    assert.equal((await a('/session')).user.staff_badge, false);
+    await a('/profile', 'PATCH', { name: 'Mom A', city: 'Austin', bio: 'No badge spoofing', avatar: '', staff_badge: true, developer_badge: true, is_admin: true, verified_member:true });
+    assert.equal((await a('/session')).user.staff_badge, false); assert.equal((await a('/session')).user.verified_member,false);
     assert.equal((await a('/session')).user.developer_badge, false);
     await b(`/posts/${newPost.id}/comments`, 'POST', { body: 'Developer comment' }, 201);
     assert.equal((await a(`/posts/${newPost.id}/comments`)).find(c => c.body === 'Developer comment').developer_badge, 1);
@@ -382,6 +383,12 @@ test('MySQL-backed community workflows and access controls', { skip: process.env
       const [[audit]] = await membershipDb.execute("SELECT COUNT(*) AS total FROM admin_audit WHERE action='membership_approve'");
       assert.ok(Number(audit.total)>=4);
     } finally { await membershipDb.end(); }
+
+    assert.equal((await a('/verification')).enabled,false);
+    await a('/verification/attempts','POST',{consent:true},503);
+    const cameraPage=await fetch(base+'/verification-check.html');
+    assert.equal(cameraPage.status,200);assert.ok(cameraPage.headers.get('content-security-policy').includes('wasm-unsafe-eval'));
+    const homepage=await fetch(base+'/');assert.equal(homepage.headers.get('content-security-policy').includes('wasm-unsafe-eval'),false);
   } finally {
     clearTimeout(watchdog);
     child.kill('SIGTERM');
