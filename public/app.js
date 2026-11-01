@@ -251,11 +251,12 @@ function latestCommentPreview(comment) {
 
 async function administrationPage(route) {
   if(!me.admin) return empty('Administrator access required.','Choose another page.');
-  const tabs={users:'Users',applications:'Membership',verification:'Verification review',moderation:'Moderation',logs:'Logs',invitations:'Invitations'};
+  const tabs={users:'Users',announcements:'Announcements',applications:'Membership',verification:'Verification review',moderation:'Moderation',logs:'Logs',invitations:'Invitations'};
   const section=route.split('?')[0].split('/')[1] || 'users';
   if(!Object.hasOwn(tabs,section)) return empty('Administration page unavailable.','Choose Administration from the navigation.');
   const params=new URLSearchParams(route.split('?')[1]);
   let html=heading('Administration','Manage your village from one place.')+`<nav class="admin-tabs" aria-label="Administration sections">${Object.entries(tabs).map(([key,label])=>`<a href="#admin/${key}" class="${section===key?'active':''}" ${section===key?'aria-current="page"':''}>${esc(label)}</a>`).join('')}</nav>`;
+  if(section==='announcements')return html+await announcementAdminPage();
   if(section==='applications') return html+await membershipPage(route);
   if(section==='verification') return html+await verificationPage(route);
   if(section==='invitations') {

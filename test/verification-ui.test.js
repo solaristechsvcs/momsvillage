@@ -103,7 +103,7 @@ test('administration consolidates staff navigation and keeps audit logs private'
  });
  try{
   const w=ui.w;await waitFor(()=>w.document.querySelector('.admin-tabs'));
-  assert.equal(w.document.querySelectorAll('.admin-tabs a').length,6);
+  assert.equal(w.document.querySelectorAll('.admin-tabs a').length,7);
   assert.equal(w.document.querySelector('.sidebar a[href="#applications"]'),null);
   assert.equal(w.document.querySelector('.sidebar a[href="#verification-review"]'),null);
   assert.equal(w.document.querySelector('.sidebar a[href="#invitations"]'),null);

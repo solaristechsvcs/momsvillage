@@ -12,6 +12,7 @@ import { readFile,access } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { text, id, price } from './validation.js';
 import { authColumns, updatePassword, sameAuthVersion } from './passwords.js';
+import {announcementsRouter} from './announcements.js';
 import {childrenRouter,sharedChildren} from './children.js';
 import { socialRouter } from './social.js';
 import { verificationSettings } from './verification-utils.js';
@@ -37,6 +38,8 @@ const verificationSchema = await readFile(new URL('./verification-schema.sql', i
 for (const statement of verificationSchema.split(';').map(s => s.trim()).filter(Boolean)) await db.query(statement);
 const childrenSchema=await readFile(new URL('./children-schema.sql',import.meta.url),'utf8');
 for(const statement of childrenSchema.split(';').map(s=>s.trim()).filter(Boolean))await db.query(statement);
+const announcementSchema=await readFile(new URL('./announcement-schema.sql',import.meta.url),'utf8');
+for(const statement of announcementSchema.split(';').map(s=>s.trim()).filter(Boolean))await db.query(statement);
 await initializeBadgeStorage(db, config.mysql.database);
 await initializeAdminRoles(db, config);
 await initializeMembership(db);
@@ -83,6 +86,7 @@ const requireAccount = async (req, res, next) => {
 };
 const requireApproved = (req, res, next) => membershipStatus(req.user) === 'approved' ? next() : res.status(403).json({ error: 'Approved membership is required.', code: 'MEMBERSHIP_REQUIRED', membership_status: membershipStatus(req.user) });
 const requireAdmin = (req, res, next) => req.isAdmin ? next() : res.status(403).json({ error: 'Administrator access required.' });
+app.get('/api/announcement',async(req,res)=>{const [announcement]=await query('SELECT title,body,tone,revision FROM site_announcement WHERE id=1 AND enabled=TRUE');res.json({announcement:announcement??null});});
 app.get('/api/session', async (req, res) => {
   req.session.csrf ??= randomBytes(32).toString('hex');
   const [user] = req.session.userId ? await query(`SELECT u.*,${authColumns()},EXISTS(SELECT 1 FROM member_verifications own_check WHERE own_check.user_id=u.id AND own_check.current_attempt_id IS NOT NULL) AS has_verification_data,a.status AS membership_status,${badgeColumns()} FROM users u LEFT JOIN membership_applications a ON a.user_id=u.id WHERE u.id=?`, [req.session.userId]) : [];
@@ -140,6 +144,7 @@ app.use('/api', verificationRouter({ service:verificationService,requireApproved
 app.use('/api', membershipRouter({ db, query, config, fail, requireApproved, requireAdmin }));
 app.use('/api', requireApproved);
 app.use('/api',childrenRouter({db,query}));
+app.use('/api',announcementsRouter({db,query,requireAdmin}));
 app.get('/api/chat/online',async(req,res)=>res.json({user_ids:await chat.online(req.user.id)}));
 const social = await socialRouter({ db, query, config, fail, onMessage:(a,b)=>chat?.message(a,b) });
 app.use('/api', social.router);

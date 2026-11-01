@@ -14,7 +14,8 @@ test('responsive pages, mobile menu, dialogs and chat fit real browser viewports
  await page.addInitScript(()=>{const socket={connected:true,on:()=>socket,emit:()=>{},connect:()=>{},disconnect:()=>{}};window.io=()=>socket;});
  await page.route('**/api/**',async route=>{
   const path=new URL(route.request().url()).pathname.slice(4);let data;
-  if(path==='/session')data={user:signedIn?user:null,csrf:'test'};
+  if(path==='/announcement')data={announcement:{title:'Village announcement',body:'Community update. '+'details'.repeat(60),tone:'important',revision:1}};
+  else if(path==='/session')data={user:signedIn?user:null,csrf:'test'};
   else if(path==='/unread')data={messages:1,notifications:0};
   else if(path==='/posts'||path==='/messages'||path==='/groups')data=[];
   else if(path==='/profile/children')data=[];

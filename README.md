@@ -177,3 +177,11 @@ My profile includes an optional Children section. Add, edit, or remove up to 20 
 Entries are private by default. Enable Show this entry on my profile to approved members for each entry you wish to share. Shared entries appear as compact age badges beside the profile name: blue for boys, pink for girls, and a rainbow icon for undisclosed gender. For example, 23 months displays 1y11m and 9 years displays 9y. Name and full age/gender details are available in the badge's accessible description/tooltip. Private entries are excluded from member and administrator profile responses; blocked viewers cannot see shared entries. Removing or switching an entry to private takes effect on subsequent profile requests.
 
 Deploy source and restart Wisp; profile_children is created automatically. No config changes are required. Tests cover ownership, validation, sharing, privacy, removal, compact age labels, and the mobile editor.
+
+### Sitewide announcement (0.7.1)
+
+Administration / Announcements lets approved administrators save a draft, publish or edit one active public banner, choose Info/Important/Maintenance styling, and remove the banner. Removing it keeps the text as an unpublished draft. A revision check prevents stale edits from overwriting another administrator's changes. Changes are recorded in audit logs without including announcement text.
+
+The banner appears on community pages, sign-in/application screens, password-change screens, and the verification camera page. It is public, so do not include private member information. Open visible pages check every 30 seconds and when returning to a tab. Visitors may dismiss the current revision for that browser tab/session; a new revision appears again. Messages are plain text and are escaped. On a network interruption, the last loaded banner remains until the next successful refresh.
+
+Update files and restart Wisp; site_announcement is created automatically. No config changes are needed.

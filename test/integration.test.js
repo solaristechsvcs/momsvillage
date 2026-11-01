@@ -68,6 +68,21 @@ test('MySQL-backed community workflows and access controls', { skip: process.env
     await admin('/register', 'POST', { name: 'Admin', email: 'admin@example.com', password: 'a-long-password-123', agree: true }, 403);
     await admin('/register', 'POST', { name: 'Admin', email: 'admin@example.com', password: 'a-long-password-123', agree: true, setup_code: code }, 201);
     assert.equal((await admin('/session')).user.admin, true);
+
+    assert.equal((await guest('/announcement')).announcement,null);
+    await guest('/session');await guest('/admin/announcement','GET',undefined,401);
+    let banner=await admin('/admin/announcement');assert.equal(banner.enabled,false);
+    await admin('/admin/announcement','PUT',{revision:banner.revision,title:'Draft',body:'Not published',tone:'info',enabled:false});
+    assert.equal((await guest('/announcement')).announcement,null);
+    banner=await admin('/admin/announcement');
+    await admin('/admin/announcement','PUT',{revision:banner.revision,title:'Village news',body:'Welcome to our village!',tone:'important',enabled:true});
+    const published=(await guest('/announcement')).announcement;assert.equal(published.body,'Welcome to our village!');assert.equal(published.updated_by,undefined);
+    await admin('/admin/announcement','PUT',{revision:banner.revision,title:'Stale',body:'Must not overwrite',tone:'info',enabled:true},409);
+    banner=await admin('/admin/announcement');
+    await admin('/admin/announcement','PUT',{revision:banner.revision,title:'',body:'',tone:'info',enabled:true},400);
+    await admin('/admin/announcement','DELETE',{revision:banner.revision});
+    assert.equal((await guest('/announcement')).announcement,null);
+    assert.equal((await admin('/admin/announcement')).body,'Welcome to our village!');
     assert.equal(userA.membership_status, 'pending'); assert.equal(userA.verified_member,false);
     for (const path of ['/posts','/members','/members/' + userB.id,'/groups','/events','/listings','/messages','/notifications','/unread','/uploads','/invitations','/admin','/admin/membership-applications','/admin/verification','/media/0123456789abcdef0123456789abcdef.webp']) await a(path,'GET',undefined,403);
     await a('/posts','POST',{ body:'Unauthorized post' },403);
@@ -77,6 +92,8 @@ test('MySQL-backed community workflows and access controls', { skip: process.env
     await approveMember(a,userA.id); await approveMember(b,userB.id);
 
     await b('/admin', 'GET', undefined, 403);
+    await b('/admin/announcement','GET',undefined,403);
+    await b('/admin/announcement','PUT',{revision:1,title:'Unauthorized',body:'No',tone:'info',enabled:true},403);
     await a('/profile', 'PATCH', { name: 'Mom A', city: 'Austin', bio: 'Hello village', avatar: '' });
     const profile = await b(`/members/${userA.id}`); assert.equal(profile.bio, 'Hello village'); assert.equal(profile.email, undefined);
 
