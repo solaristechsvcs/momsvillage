@@ -9,7 +9,7 @@ import { id, text, image } from './validation.js';
 import { badgeColumns } from './badges.js';
 import { approvedMemberSql } from './membership.js';
 
-export async function socialRouter({ db, query, config, fail }) {
+export async function socialRouter({ db, query, config, fail, onMessage=()=>{} }) {
   const router = Router();
   const uploadPath = resolve(config.uploadsDirectory ?? './uploads');
   await mkdir(uploadPath, { recursive: true });
@@ -121,6 +121,15 @@ export async function socialRouter({ db, query, config, fail }) {
     });
     res.json({ ok: true });
   });
+  router.get('/chat/settings',async(req,res)=>{
+    const [row]=await query('SELECT show_online FROM chat_preferences WHERE user_id=?',[req.user.id]);
+    res.json({show_online:!!row?.show_online});
+  });
+  router.put('/chat/settings',async(req,res)=>{
+    if(typeof req.body.show_online!=='boolean') fail(400,'Specify online visibility.');
+    await query('INSERT INTO chat_preferences(user_id,show_online) VALUES(?,?) ON DUPLICATE KEY UPDATE show_online=VALUES(show_online)',[req.user.id,req.body.show_online]);
+    res.json({ok:true});
+  });
   router.get('/messages', async (req, res) => {
     const threads = await query(`SELECT m.id,m.sender_id,m.recipient_id,m.body,m.created_at,u.id AS peer_id,u.name,u.avatar,${badgeColumns()},
       (SELECT COUNT(*) FROM messages x WHERE x.sender_id=u.id AND x.recipient_id=? AND x.read_at IS NULL) AS unread
@@ -132,28 +141,38 @@ export async function socialRouter({ db, query, config, fail }) {
   router.get('/messages/:id', async (req, res) => {
     const peer = await member(req.params.id, req.user.id);
     const before = req.query.before ? id(req.query.before) : null;
+    const after = req.query.after ? id(req.query.after) : null;
+    if(before && after) fail(400,'Choose either older or newer messages.');
     const messages = await query(`SELECT id,sender_id,recipient_id,body,read_at,created_at FROM messages
-      WHERE ((sender_id=? AND recipient_id=?) OR (sender_id=? AND recipient_id=?)) ${before ? 'AND id<?' : ''}
-      ORDER BY id DESC LIMIT 50`, [req.user.id, peer.id, peer.id, req.user.id, ...(before ? [before] : [])]);
+      WHERE ((sender_id=? AND recipient_id=?) OR (sender_id=? AND recipient_id=?)) ${before ? 'AND id<?' : after ? 'AND id>?' : ''}
+      ORDER BY id ${after?'ASC':'DESC'} LIMIT 50`, [req.user.id, peer.id, peer.id, req.user.id, ...(before ? [before] : after ? [after] : [])]);
     if (messages.length) {
       const ids = messages.map(m => m.id);
       await query(`UPDATE messages SET read_at=COALESCE(read_at,UTC_TIMESTAMP()) WHERE recipient_id=? AND id IN (${ids.map(() => '?').join(',')})`, [req.user.id, ...ids]);
       await query(`UPDATE notifications SET read_at=COALESCE(read_at,UTC_TIMESTAMP()) WHERE user_id=? AND kind='message' AND target_id IN (${ids.map(() => '?').join(',')})`, [req.user.id, ...ids]);
     }
     const [friend] = await query("SELECT 1 FROM friendships WHERE user_low=? AND user_high=? AND status='accepted'", pair(req.user.id, peer.id));
-    res.json({ peer, can_send: !!friend && !await blocked(req.user.id, peer.id), messages: messages.reverse(), has_more: messages.length === 50 });
+    res.json({ peer, can_send: !!friend && !await blocked(req.user.id, peer.id), messages: after ? messages : messages.reverse(), has_more: messages.length === 50 });
   });
   const messageLimit = rateLimit({ windowMs: 60000, limit: 30, keyGenerator: req => String(req.user.id), standardHeaders: 'draft-8', legacyHeaders: false });
   router.post('/messages/:id', messageLimit, async (req, res) => {
     const peer = await member(req.params.id, req.user.id), body = text(req.body.body, 4000);
+    const nonce=req.body.nonce;
+    if(nonce!==undefined && (typeof nonce!=='string'||!/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/.test(nonce))) fail(400,'Invalid send identifier.');
     const messageId = await transaction(async execute => {
       await lockUsers(execute, req.user.id, peer.id);
       if (await blocked(req.user.id, peer.id, execute)) fail(403, 'Messaging is unavailable for this member.');
       const [friend] = await execute("SELECT 1 FROM friendships WHERE user_low=? AND user_high=? AND status='accepted'", pair(req.user.id, peer.id));
       if (!friend) fail(403, 'You must be friends before sending a message.');
+      if(nonce) {
+        const [existing]=await execute('SELECT m.id,m.recipient_id,m.body FROM chat_send_keys k JOIN messages m ON m.id=k.message_id WHERE k.user_id=? AND k.nonce=?',[req.user.id,nonce]);
+        if(existing) {if(existing.recipient_id!==peer.id||existing.body!==body) fail(409,'Send identifier already used.');return existing.id;}
+      }
       const message = await execute('INSERT INTO messages(sender_id,recipient_id,body) VALUES(?,?,?)', [req.user.id, peer.id, body]);
+      if(nonce) await execute('INSERT INTO chat_send_keys(user_id,nonce,message_id) VALUES(?,?,?)',[req.user.id,nonce,message.insertId]);
       await notify(peer.id, req.user.id, 'message', message.insertId, execute); return message.insertId;
     });
+    await Promise.resolve(onMessage(req.user.id,peer.id)).catch(()=>{});
     res.status(201).json({ id: messageId });
   });
   router.get('/notifications', async (req, res) => {

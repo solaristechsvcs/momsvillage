@@ -28,6 +28,7 @@ test('MySQL-backed community workflows and access controls', { skip: process.env
   child.stderr.on('data', d => { output += d; console.log('[server error]', String(d).trim()); });
   const watchdog = setTimeout(() => child.kill('SIGKILL'), 45000);
   const base = 'http://127.0.0.1:3099';
+  const chatSockets=[];
   try {
     let ready = false;
     for (let i = 0; i < 80; i++) {
@@ -40,7 +41,7 @@ test('MySQL-backed community workflows and access controls', { skip: process.env
     function client() {
       const proxyAddress = `192.0.2.${clientCounter++}`;
       let cookie = '', csrf = '';
-      return async (path, method = 'GET', body, status = 200, withCsrf = true) => {
+      const request=async (path, method = 'GET', body, status = 200, withCsrf = true) => {
         console.log('[integration]', method, path);
         if (path === '/register') body = { eligibility_confirmed:true, application_reason:'I am a mother looking for a supportive community.', ...body };
         const multipart = body instanceof FormData;
@@ -49,6 +50,7 @@ test('MySQL-backed community workflows and access controls', { skip: process.env
         const data = r.headers.get('content-type')?.startsWith('application/json') ? await r.json() : { bytes: Buffer.from(await r.arrayBuffer()), type: r.headers.get('content-type') }; assert.equal(r.status, status, `${method} ${path}: ${JSON.stringify(data)}`);
         if (data.csrf) csrf = data.csrf; return data;
       };
+      request.snapshot=()=>({cookie,csrf});return request;
     }
     const a = client(), b = client(), admin = client(), guest = client();
     async function approveMember(member, userId) {
@@ -98,7 +100,9 @@ test('MySQL-backed community workflows and access controls', { skip: process.env
     await b('/reports', 'POST', { type: 'post', id: post.id, reason: 'Please review this' }, 201);
     const report = (await admin('/admin')).reports[0]; assert.equal((await admin(`/admin/reports/${report.id}/content`)).body, 'First village conversation');
     await admin(`/content/post/${post.id}`, 'DELETE'); await admin(`/admin/reports/${report.id}`, 'PATCH', {}); assert.equal((await admin('/admin')).reports.length, 0);
-    await admin(`/admin/users/${userB.id}`, 'PATCH', { banned: true }); await b('/posts', 'GET', undefined, 403);
+    const removedFromChat=socketEvent(liveB,'disconnect');
+    await admin(`/admin/users/${userB.id}`, 'PATCH', { banned: true });
+    await removedFromChat; await b('/posts', 'GET', undefined, 403);
     await admin(`/admin/users/${userB.id}`, 'PATCH', { banned: false }); await b('/posts');
     await a('/logout', 'POST'); await a('/session'); await a('/login', 'POST', { email: 'a@example.com', password: 'a-long-password-123' }); assert.equal((await a('/session')).user.id, userA.id);
 
@@ -117,12 +121,48 @@ test('MySQL-backed community workflows and access controls', { skip: process.env
     assert.ok((await b('/notifications')).some(n => n.kind === 'friend_request'));
     await b(`/friends/${userA.id}`, 'PATCH', {});
     assert.equal((await a('/friends')).friends[0].status, 'accepted');
-    const firstMessage = await a(`/messages/${userB.id}`, 'POST', { body: 'A private hello' }, 201);
+
+    const {io}=await import('socket.io-client');
+    const socketEvent=(socket,name,check=()=>true)=>new Promise((resolve,reject)=>{
+      const timer=setTimeout(()=>{socket.off(name,on);reject(new Error('Missing socket event '+name));},4000);
+      function on(data){if(!check(data))return;clearTimeout(timer);socket.off(name,on);resolve(data);}
+      socket.on(name,on);
+    });
+    async function connectChat(member,{badCsrf=false,origin=base,reject=false}={}){
+      const info=member.snapshot(),socket=io(base,{transports:['websocket'],autoConnect:false,reconnection:false,auth:{csrf:badCsrf?'wrong':info.csrf},extraHeaders:{Cookie:info.cookie,Origin:origin}});
+      chatSockets.push(socket);
+      const connected=socketEvent(socket,reject?'connect_error':'connect');socket.connect();await connected;return socket;
+    }
+    await connectChat(guest,{reject:true});
+    await connectChat(a,{badCsrf:true,reject:true});
+    await connectChat(a,{origin:'https://untrusted.example',reject:true});
+    const liveA=await connectChat(a),liveB=await connectChat(b),liveC=await connectChat(c);
+    const watch=(socket,peerId)=>new Promise(resolve=>socket.emit('chat:watch',{peerId},resolve));
+    assert.equal((await watch(liveC,userA.id)).ok,false);
+    assert.equal((await watch(liveA,userB.id)).ok,true);
+    assert.equal((await watch(liveB,userA.id)).ok,true);
+    const typing=socketEvent(liveB,'chat:typing',e=>e.peerId===userA.id);
+    liveA.emit('chat:typing',{active:true});assert.equal((await typing).active,true);
+    assert.equal((await b('/chat/settings')).show_online,false);
+    await b('/chat/settings','PUT',{show_online:true});
+    let presence=socketEvent(liveA,'chat:presence',e=>e.peerId===userB.id&&e.online);
+    await watch(liveA,userB.id);await presence;
+    await b('/chat/settings','PUT',{show_online:false});
+    presence=socketEvent(liveA,'chat:presence',e=>e.peerId===userB.id&&!e.online);
+    await watch(liveA,userB.id);await presence;
+    let leaked=false;liveC.on('chat:message',()=>{leaked=true;});
+    const delivered=socketEvent(liveB,'chat:message',e=>e.peerId===userA.id);
+    const firstMessage = await a(`/messages/${userB.id}`, 'POST', { body: 'A private hello',nonce:'11111111-1111-4111-8111-111111111111' }, 201);
+    await delivered;
+    const retryMessage=await a('/messages/'+userB.id,'POST',{body:'A private hello',nonce:'11111111-1111-4111-8111-111111111111'},201);
+    assert.equal(retryMessage.id,firstMessage.id);assert.equal(leaked,false);
+    await a('/messages/'+userB.id,'POST',{body:'Different body',nonce:'11111111-1111-4111-8111-111111111111'},409);
     assert.equal((await b('/unread')).messages, 1);
     assert.equal((await b('/messages'))[0].body, 'A private hello');
     const history = await b(`/messages/${userA.id}`);
     assert.equal(history.messages[0].body, 'A private hello');
     assert.equal(history.can_send, true);
+    assert.equal((await b('/messages/'+userA.id+'?after='+firstMessage.id)).messages.length,0);
     assert.equal((await b('/unread')).messages, 0);
     assert.equal((await c(`/messages/${userA.id}`)).messages.length, 0);
     assert.equal((await admin(`/messages/${userA.id}`)).messages.length, 0);
@@ -131,6 +171,7 @@ test('MySQL-backed community workflows and access controls', { skip: process.env
     const messageReport = (await admin('/admin')).reports[0];
     assert.equal((await admin(`/admin/reports/${messageReport.id}/content`)).body, 'A private hello');
     await b(`/blocks/${userA.id}`, 'POST', {});
+    assert.equal((await watch(liveA,userB.id)).ok,false);
     assert.equal((await a('/friends')).friends.length, 0);
     await a(`/messages/${userB.id}`, 'POST', { body: 'Blocked message' }, 403);
     await a(`/friends/${userB.id}`, 'POST', {}, 403);
@@ -176,7 +217,9 @@ test('MySQL-backed community workflows and access controls', { skip: process.env
     await a('/profile', 'PATCH', { name: 'Mom A', city: 'Austin', bio: 'Photo removed', avatar: '' });
     await a(`/uploads/${filename}`, 'DELETE'); await a(mediaPath, 'GET', undefined, 404);
     assert.equal((await a('/uploads')).length, 0);
+    const removedFromChat=socketEvent(liveB,'disconnect');
     await admin(`/admin/users/${userB.id}`, 'PATCH', { banned: true });
+    await removedFromChat;
     await a(`/messages/${userB.id}`, 'POST', { body: 'Suspended target' }, 404);
     await admin(`/admin/users/${userB.id}`, 'PATCH', { banned: false });
 
@@ -440,6 +483,7 @@ test('MySQL-backed community workflows and access controls', { skip: process.env
     assert.equal(cameraPage.status,200);assert.ok(cameraPage.headers.get('content-security-policy').includes('wasm-unsafe-eval'));
     const homepage=await fetch(base+'/');assert.equal(homepage.headers.get('content-security-policy').includes('wasm-unsafe-eval'),false);
   } finally {
+    for(const socket of chatSockets)socket.disconnect();
     clearTimeout(watchdog);
     child.kill('SIGTERM');
     await Promise.race([new Promise(resolve => child.once('exit', resolve)), delay(3000)]);

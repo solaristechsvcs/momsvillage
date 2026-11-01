@@ -14,6 +14,15 @@ CREATE TABLE IF NOT EXISTS messages (
  INDEX inbox(recipient_id,id), INDEX sent(sender_id,id),
  FOREIGN KEY(sender_id) REFERENCES users(id), FOREIGN KEY(recipient_id) REFERENCES users(id)
 );
+CREATE TABLE IF NOT EXISTS chat_send_keys (
+ user_id INT UNSIGNED NOT NULL, nonce CHAR(36) NOT NULL, message_id INT UNSIGNED NOT NULL,
+ PRIMARY KEY(user_id,nonce), FOREIGN KEY(user_id) REFERENCES users(id),
+ FOREIGN KEY(message_id) REFERENCES messages(id) ON DELETE CASCADE
+);
+CREATE TABLE IF NOT EXISTS chat_preferences (
+ user_id INT UNSIGNED PRIMARY KEY, show_online BOOLEAN NOT NULL DEFAULT FALSE,
+ FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+);
 CREATE TABLE IF NOT EXISTS notifications (
  id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY, user_id INT UNSIGNED NOT NULL, actor_id INT UNSIGNED NOT NULL,
  kind VARCHAR(30) NOT NULL, target_id INT UNSIGNED NOT NULL, read_at DATETIME NULL,

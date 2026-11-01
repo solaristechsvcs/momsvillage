@@ -1,4 +1,6 @@
 import express from 'express';
+import { createServer } from 'node:http';
+import { createLiveChat } from './live-chat.js';
 import session from 'express-session';
 import MySQLStoreFactory from 'express-mysql-session';
 import mysql from 'mysql2/promise';
@@ -47,7 +49,7 @@ verificationCleanup.unref();
 const app = express();
 app.disable('x-powered-by');
 if (config.trustProxy) app.set('trust proxy', config.trustProxy);
-const standardSecurity = helmet({ contentSecurityPolicy: { directives: { imgSrc: ["'self'",'https:','data:'],scriptSrc:["'self'"],styleSrc:["'self'"],upgradeInsecureRequests:config.secureCookies ? [] : null } } });
+const standardSecurity = helmet({ contentSecurityPolicy: { directives: { imgSrc: ["'self'",'https:','data:'],connectSrc:["'self'",new URL(config.publicUrl ?? 'http://127.0.0.1:'+(config.port ?? 3014)).origin.replace(/^http/,'ws')],scriptSrc:["'self'"],styleSrc:["'self'"],upgradeInsecureRequests:config.secureCookies ? [] : null } } });
 const cameraRegion = /^[a-z]{2}(?:-[a-z]+)+-\d+$/.test(verificationConfig.region) ? verificationConfig.region : 'us-east-1';
 const cameraSecurity = helmet({ contentSecurityPolicy: { directives: {
   imgSrc:["'self'",'data:','blob:'],scriptSrc:["'self'","'wasm-unsafe-eval'",'https://cdn.liveness.rekognition.amazonaws.com'],styleSrc:["'self'","'unsafe-inline'"],
@@ -59,8 +61,11 @@ app.use((req,res,next)=>{if(req.path==='/verification-check.html') res.set('Perm
 app.use(express.json({ limit: '32kb' }));
 const MySQLStore = MySQLStoreFactory(session);
 const sessionStore = new MySQLStore({ ...config.mysql, createDatabaseTable: true });
-app.use(session({ name: 'mv.sid', secret: config.sessionSecret, store: sessionStore, resave: false, saveUninitialized: false,
-  cookie: { httpOnly: true, secure: !!config.secureCookies, sameSite: 'lax', maxAge: 7 * 86400000 } }));
+const sessionMiddleware=session({ name: 'mv.sid', secret: config.sessionSecret, store: sessionStore, resave: false, saveUninitialized: false,
+  cookie: { httpOnly: true, secure: !!config.secureCookies, sameSite: 'lax', maxAge: 7 * 86400000 } });
+app.use(sessionMiddleware);
+let chat;
+app.use('/api',(req,res,next)=>{const chatPath=req.path;res.on('finish',()=>{if(res.statusCode<400 && !['GET','HEAD'].includes(req.method) && /^\/(logout|password|admin|membership|friends|blocks|chat)/.test(chatPath)) void chat?.refresh();});next();});
 app.use('/api', rateLimit({ windowMs: 60000, limit: 180, standardHeaders: 'draft-8', legacyHeaders: false }));
 app.use('/api', (req, res, next) => { res.set('Cache-Control', 'no-store'); next(); });
 const adminEmail = email => (config.adminEmails ?? []).map(e => e.toLowerCase()).includes(email.toLowerCase());
@@ -131,7 +136,7 @@ app.post('/api/admin/users/:id/password',requireApproved,requireAdmin,passwordLi
 app.use('/api', verificationRouter({ service:verificationService,requireApproved,requireAdmin }));
 app.use('/api', membershipRouter({ db, query, config, fail, requireApproved, requireAdmin }));
 app.use('/api', requireApproved);
-const social = await socialRouter({ db, query, config, fail });
+const social = await socialRouter({ db, query, config, fail, onMessage:(a,b)=>chat?.message(a,b) });
 app.use('/api', social.router);
 app.patch('/api/profile', async (req, res) => {
   await social.withImage(req.user.id, req.body.avatar, (execute, url) => execute('UPDATE users SET name=?,city=?,bio=?,avatar=? WHERE id=?', [text(req.body.name, 80), text(req.body.city, 120, false), text(req.body.bio, 2000, false), url, req.user.id]));
@@ -326,6 +331,8 @@ app.use((error, req, res, next) => {
   res.status(status).json({ error: error.code === 'ER_DUP_ENTRY' ? 'This email is already registered.' : status >= 500 ? 'Something went wrong. Please try again.' : error.message });
 });
 await sessionStore.onReady();
-const server = app.listen(config.port ?? 3014, config.host ?? '0.0.0.0', () => console.log(`Moms Village v${version} listening on port ${config.port ?? 3014}`));
-async function shutdown() { clearInterval(verificationCleanup); server.close(async () => { await db.end(); await sessionStore.close(); process.exit(0); }); }
+const server=createServer(app);
+chat=createLiveChat({server,sessionMiddleware,sessionStore,query,config});
+server.listen(config.port ?? 3014,config.host ?? '0.0.0.0',()=>console.log(`Moms Village v${version} listening on port ${config.port ?? 3014}`));
+async function shutdown() { clearInterval(verificationCleanup); chat.close(); server.close(async () => { await db.end(); await sessionStore.close(); process.exit(0); }); }
 process.on('SIGTERM', shutdown); process.on('SIGINT', shutdown);

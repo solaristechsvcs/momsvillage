@@ -142,3 +142,18 @@ Lists are bounded to the latest 50 posts, 100 comments per conversation page, 10
 ## Checks
 
 `npm test` runs input-validation tests; `npm run check` checks JavaScript syntax. GitHub Actions runs MySQL 8.4 integration tests for core workflows, friend-request permissions, message isolation, blocking, reports, unread state, image validation/ownership, metadata removal and safe image deletion. It also runs DOM-based UI tests for member search/navigation, friend requests, messaging, notifications, escaping and photo fields. These tests are gated by `MV_INTEGRATION=1` and `MV_UI=1` respectively. Integration tests refuse to overwrite an existing `config.js`; use only the disposable database configured in the workflow. They leave test data behind. Verify layout and secure cookies through your production HTTPS proxy before inviting members.
+
+## Live chat (0.6.0)
+
+The Messages page now receives live updates for private, text-only conversations between accepted friends. Existing message history is preserved. Blocking and reporting remain available; staff can review individual reported messages through Administration / Moderation. Verified status is not required.
+
+Online visibility is off by default; enable it on the Messages inbox. Only accepted, unblocked friends may receive online status and typing hints. Status is approximate and disappears when visibility is disabled or access is removed. Typing clears automatically.
+
+Messages are committed to MySQL through the existing CSRF-protected API before live notifications are sent. Browser send identifiers prevent duplicate messages on retry. Reconnection loads missed messages using an incremental cursor and preserves the current draft. Failed sends retain the draft; press Send again to retry. When disconnected, messages can still be sent over HTTPS and checked with Refresh. Viewing older history pauses live updates until returning to the latest conversation.
+
+Sessions, password versions, membership, friendships, and blocks are checked on live access. Security-related HTTP changes trigger connection revalidation, with a five-second background check as a fallback. Unapproved, suspended, password-change-required, signed-out, and password-reset sessions cannot keep using chat. Each member may have six concurrent live connections; typing/watch events and message sends are rate limited.
+
+Deploy: update source, run npm install, and restart Wisp. Tables are created automatically. Set config.js publicUrl to the exact browser origin, for example https://social.thesynergy.dev. Development uses the configured publicUrl too. Cloudflare Tunnel must forward /socket.io/ WebSocket connections to the same Wisp application and port; no additional public port is needed. Avoid caching /socket.io/. Use a single Node process/replica; multi-instance operation requires a shared Socket.IO adapter and distributed coordination before scaling.
+
+HTTPS/WSS protects network traffic. Messages remain readable in the application database; this release does not implement end-to-end encryption. No chat attachments, group chat, push notifications, or delivery/read receipts are included. Test production WebSocket connectivity through your tunnel after deployment.
+

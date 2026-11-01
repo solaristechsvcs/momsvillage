@@ -35,12 +35,13 @@ async function socialPage(route) {
     const peerId = route.split('?')[0].split('/')[1];
     if (!peerId) {
       socialRecords = await api('/messages');
-      return heading('A little conversation', 'Private messages between you and your friends.') + '<p class="hint">Start a conversation from a friend’s profile or your Friends page.</p>' + (socialRecords.map(t => `<a class="card thread-link" href="#messages/${t.peer_id}">${avatar(t)}<div><strong>${esc(t.name)} ${memberBadges(t)} ${t.unread ? `<span class="badge">${t.unread}</span>` : ''}</strong><p>${esc(t.body.slice(0, 130))}</p><small>${esc(date(t.created_at))}</small></div></a>`).join('') || empty('Your inbox is ready.', 'Add a friend to start your first conversation.'));
+      const settings=await api('/chat/settings');
+      return heading('A little conversation', 'Private messages between you and your friends.') + `<label class="check"><input type="checkbox" data-chat-online ${settings.show_online?'checked':''}><span>Show my online status to accepted friends (off by default)</span></label><p class="hint" data-chat-status></p>` + '<p class="hint">Start a conversation from a friend’s profile or your Friends page.</p>' + (socialRecords.map(t => `<a class="card thread-link" href="#messages/${t.peer_id}">${avatar(t)}<div><strong>${esc(t.name)} ${memberBadges(t)} ${t.unread ? `<span class="badge">${t.unread}</span>` : ''}</strong><p>${esc(t.body.slice(0, 130))}</p><small>${esc(date(t.created_at))}</small></div></a>`).join('') || empty('Your inbox is ready.', 'Add a friend to start your first conversation.'));
     }
     const before = new URLSearchParams(route.split('?')[1]).get('before');
     socialThread = await api(`/messages/${encodeURIComponent(peerId)}${before ? `?before=${encodeURIComponent(before)}` : ''}`);
     const t = socialThread;
-    return heading(t.peer.name, 'Only you and this member can read this conversation.', 'refresh-thread', 'Refresh') + '<p class="hint"><a href="#messages">Back to inbox</a> · Staff can inspect individual messages if reported.</p>' + `<div class="conversation card">${t.has_more ? `<a class="older-messages" href="#messages/${t.peer.id}?before=${t.messages[0].id}">View older messages</a>` : ''}${before ? `<a href="#messages/${t.peer.id}">Back to latest messages</a>` : ''}${t.messages.map(m => `<article class="message ${m.sender_id === me.id ? 'mine' : ''}"><strong>${m.sender_id === me.id ? 'You' : esc(t.peer.name)} ${memberBadges(m.sender_id === me.id ? me : t.peer)}</strong><p>${esc(m.body)}</p><small>${esc(date(m.created_at))}</small><button class="subtle" data-action="report" data-type="message" data-id="${m.id}">Report</button></article>`).join('') || '<p class="muted">Say hello to start your conversation.</p>'}</div>${t.can_send ? form('message', `<input type="hidden" name="recipient_id" value="${t.peer.id}">${field('body', 'Your message', { type: 'textarea', max: 4000 })}`, 'Send message') : '<p class="hint">Messaging is unavailable. You must be accepted friends and neither member can be blocked.</p>'}<div class="buttons member-controls"><button class="subtle" data-action="block" data-id="${t.peer.id}">Block member</button></div>`;
+    return heading(t.peer.name, 'Only you and this member can read this conversation.', 'refresh-thread', 'Refresh') + '<p class="hint"><a href="#messages">Back to inbox</a> · Staff can inspect individual messages if reported.</p>' + `<p class="hint" data-chat-status></p><span class="pill" data-chat-presence></span><p class="hint" data-chat-typing role="status" aria-live="polite"></p><div class="conversation card" aria-label="Conversation messages">${t.has_more ? `<a class="older-messages" href="#messages/${t.peer.id}?before=${t.messages[0].id}">View older messages</a>` : ''}${before ? `<a href="#messages/${t.peer.id}">Back to latest messages</a>` : ''}${t.messages.map(m => chatMessageMarkup(m,t.peer)).join('') || '<p class="muted" data-chat-empty>Say hello to start your conversation.</p>'}</div>${t.can_send ? form('message', `<input type="hidden" name="recipient_id" value="${t.peer.id}">${field('body', 'Your message', { type: 'textarea', max: 4000 })}`, 'Send message') : '<p class="hint">Messaging is unavailable. You must be accepted friends and neither member can be blocked.</p>'}<div class="buttons member-controls"><button class="subtle" data-action="block" data-id="${t.peer.id}">Block member</button></div>`;
   }
   socialRecords = await api('/notifications');
   const phrases = { friend_request: 'sent you a friend request', friend_accept: 'accepted your friend request', message: 'sent you a message', comment: 'commented on your post', like: 'liked your post' };
@@ -82,6 +83,7 @@ async function socialSubmit(f) {
       const hash = `members?q=${encodeURIComponent(data.q)}`;
       if (location.hash.slice(1) === hash) await load(); else location.hash = hash;
     } else {
+      if(typeof chatSend==='function'){await chatSend(f,data);return;}
       await api(`/messages/${data.recipient_id}`, 'POST', { body: data.body });
       if (location.hash.includes('?')) location.hash = `messages/${data.recipient_id}`; else await load();
       await refreshUnread();
@@ -115,3 +117,8 @@ async function refreshUnread() {
   } catch { /* Preserve the current draft if connectivity drops. */ }
 }
 setInterval(refreshUnread, 30000);
+
+function chatMessageMarkup(m,peer) {
+ return `<article class="message ${m.sender_id===me.id?'mine':''}" data-message-id="${m.id}"><strong>${m.sender_id===me.id?'You':esc(peer.name)} ${memberBadges(m.sender_id===me.id?me:peer)}</strong><p>${esc(m.body)}</p><small>${esc(date(m.created_at))}</small><button class="subtle" data-action="report" data-type="message" data-id="${m.id}">Report</button></article>`;
+}
+

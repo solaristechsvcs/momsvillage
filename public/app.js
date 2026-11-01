@@ -90,6 +90,7 @@ async function load() {
     } else html = empty('This page is unavailable.', 'Choose a page from the navigation.');
     if (current === generation) {
       $('#main').innerHTML = html;
+      if(typeof chatMount==='function')chatMount();
       if (page === 'messages') await refreshUnread();
     }
   } catch (error) { if (current === generation) $('#main').innerHTML = empty('We couldn’t load this page.', error.message); }
@@ -211,6 +212,7 @@ document.addEventListener('submit', async event => {
 });
 async function initialize() {
   try { const state = await api('/session'); me = state.user; csrf = state.csrf;
+    if(typeof chatConnect==='function')chatConnect();
     applicationPolicy = state.membership_policy ?? applicationPolicy;
     if (me?.membership_status === 'approved' && !me.must_change_password) unread = await api('/unread');
     await load(); }
