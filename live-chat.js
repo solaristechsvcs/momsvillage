@@ -20,9 +20,8 @@ export function createLiveChat({server,sessionMiddleware,sessionStore,query,conf
     const [row]=await query("SELECT f.user_low FROM friendships f JOIN users u ON u.id=? JOIN membership_applications m ON m.user_id=u.id WHERE f.user_low=LEAST(?,?) AND f.user_high=GREATEST(?,?) AND f.status='accepted' AND u.banned=FALSE AND m.status='approved' AND NOT EXISTS(SELECT 1 FROM blocks WHERE (user_id=? AND blocked_id=?) OR (user_id=? AND blocked_id=?))",[b,a,b,a,b,a,b,b,a]);
     return !!row;
   }
-  async function presence(socket) {
-    const peer=socket.data.peer;
-    if(!peer || !await allowed(socket.data.userId,peer)) {socket.emit('chat:access',{allowed:false});socket.data.peer=null;return;}
+  async function presence(socket,peer=socket.data.peer) {
+    if(!peer || !await allowed(socket.data.userId,peer)) {socket.emit('chat:access',{allowed:false,peerId:peer});socket.data.peers=(socket.data.peers??[]).filter(id=>id!==peer);return;}
     const [pref]=await query('SELECT show_online FROM chat_preferences WHERE user_id=?',[peer]);
     let online=false;
     if(pref?.show_online) for(const other of all().filter(s=>s.data.userId===peer)) {
@@ -50,17 +49,25 @@ export function createLiveChat({server,sessionMiddleware,sessionStore,query,conf
     });
     socket.on('chat:watch',async(data,ack)=>{
       try {
-        const peer=Number(data?.peerId);
-        if(!await allowed(socket.data.userId,peer)){socket.data.peer=null;(typeof ack==='function' && ack({ok:false}));socket.emit('chat:access',{allowed:false});return;}
-        socket.data.peer=peer;await presence(socket);(typeof ack==='function' && ack({ok:true}));
+        const peers=data?.peerIds ?? [data?.peerId];
+        if(!Array.isArray(peers)||peers.length>4) throw new Error();
+        socket.data.peers=[];
+        let ok=true;
+        for(const peer of [...new Set(peers)]){
+          if(!await allowed(socket.data.userId,peer)){socket.emit('chat:access',{allowed:false,peerId:peer});ok=false;continue;}
+          socket.data.peers.push(peer);
+        }
+        socket.data.peer=socket.data.peers[0]??null;
+        for(const peer of socket.data.peers)await presence(socket,peer);
+        if(typeof ack==='function')ack({ok});
       }catch{(typeof ack==='function' && ack({ok:false}));}
     });
-    socket.on('chat:leave',()=>{socket.data.peer=null;});
+    socket.on('chat:leave',()=>{socket.data.peer=null;socket.data.peers=[];});
     socket.on('chat:typing',async(data)=>{
       try {
-        const peer=socket.data.peer;
-        if(!peer||typeof data?.active!=='boolean'||!await allowed(socket.data.userId,peer)) return;
-        for(const other of all().filter(s=>s.data.userId===peer&&s.data.peer===socket.data.userId)){
+        const peer=data?.peerId ?? socket.data.peer;
+        if(!(socket.data.peers??[]).includes(peer)||typeof data?.active!=='boolean'||!await allowed(socket.data.userId,peer)) return;
+        for(const other of all().filter(s=>s.data.userId===peer&&(s.data.peers??[]).includes(socket.data.userId))){
           try {await authenticate(other);other.emit('chat:typing',{peerId:socket.data.userId,active:data.active});}catch{other.disconnect(true);}
         }
       }catch{/* Ephemeral hints can be dropped. */}
@@ -69,7 +76,7 @@ export function createLiveChat({server,sessionMiddleware,sessionStore,query,conf
   let checking=false;
   async function refresh(){
     if(checking)return;checking=true;
-    try {for(const s of all()){try{await authenticate(s);if(s.data.peer)await presence(s);}catch{s.disconnect(true);}}}
+    try {for(const s of all()){try{await authenticate(s);for(const peer of [...(s.data.peers??[])])await presence(s,peer);}catch{s.disconnect(true);}}}
     finally{checking=false;}
   }
   const timer=setInterval(()=>void refresh(),5000);timer.unref();
@@ -79,5 +86,16 @@ export function createLiveChat({server,sessionMiddleware,sessionStore,query,conf
       try {await authenticate(s);if(await allowed(s.data.userId,peer))s.emit('chat:message',{peerId:peer});}catch{s.disconnect(true);}
     }
   }
-  return {refresh,message,close:()=>{clearInterval(timer);io.close();}};
+  async function online(userId){
+    const ids=new Set();
+    for(const socket of all()){
+      const peer=socket.data.userId;
+      if(ids.has(peer)||!await allowed(userId,peer))continue;
+      const [pref]=await query('SELECT show_online FROM chat_preferences WHERE user_id=?',[peer]);
+      if(!pref?.show_online)continue;
+      try{await authenticate(socket);ids.add(peer);}catch{socket.disconnect(true);}
+    }
+    return [...ids];
+  }
+  return {refresh,message,online,close:()=>{clearInterval(timer);io.close();}};
 }

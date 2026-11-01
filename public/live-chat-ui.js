@@ -1,28 +1,34 @@
 let chatSocket=null,chatBusy=false,chatAgain=false,chatTypingTimer,chatLastTyping=0;
 function chatStatus() {
+  if(typeof dockConnection==='function')dockConnection();
   const el=document.querySelector('[data-chat-status]');
   if(el)el.textContent=chatSocket?.connected?'Live chat connected':'Reconnecting… Messages can still be sent; use Refresh to check for replies.';
 }
 function chatConnect() {
+  if(typeof dockMount==='function')dockMount();
   if(!me || me.membership_status!=='approved' || me.must_change_password) {chatSocket?.disconnect();chatSocket=null;return;}
   if(typeof window.io!=='function'||chatSocket)return;
   chatSocket=window.io({transports:['websocket'],auth:callback=>callback({csrf}),reconnectionDelayMax:5000});
-  chatSocket.on('connect',()=>{chatStatus();chatMount();void chatSync();void refreshUnread();});
+  chatSocket.on('connect',()=>{chatStatus();chatMount();void chatSync();if(typeof dockSync==='function')void dockSync();void refreshUnread();});
   chatSocket.on('disconnect',reason=>{chatStatus();document.querySelector('[data-chat-presence]')?.replaceChildren();if(reason==='io server disconnect') {chatSocket=null;void initialize();}});
   chatSocket.on('connect_error',()=>chatStatus());
-  chatSocket.on('chat:message',()=>{void refreshUnread();if(page==='messages'&&!location.hash.includes('/'))void load();else void chatSync();});
+  chatSocket.on('chat:message',data=>{if(typeof dockIncoming==='function')void dockIncoming(data);void refreshUnread();if(page==='messages'&&!location.hash.includes('/'))void load();else void chatSync();});
   chatSocket.on('chat:typing',data=>{
+    if(typeof dockHint==='function')dockHint('typing',data);
     if(data.peerId!==socialThread?.peer.id||page!=='messages')return;
     const el=document.querySelector('[data-chat-typing]');if(!el)return;
     el.textContent=data.active?'Typing…':'';
     clearTimeout(chatTypingTimer);chatTypingTimer=setTimeout(()=>{el.textContent='';},3500);
   });
   chatSocket.on('chat:presence',data=>{
+    if(typeof dockHint==='function')dockHint('presence',data);
     if(data.peerId!==socialThread?.peer.id)return;
     const el=document.querySelector('[data-chat-presence]');if(el)el.textContent=data.online?'Online':'';
   });
   chatSocket.on('chat:access',data=>{
     if(data.allowed!==false)return;
+    if(typeof dockAccess==='function')dockAccess(data.peerId);
+    if(data.peerId && data.peerId!==socialThread?.peer.id)return;
     const f=document.querySelector('form[data-form="message"]');
     if(f){for(const el of f.elements)el.disabled=true;f.querySelector('.form-error').textContent='Messaging is unavailable. You must be accepted friends and neither member can be blocked.';}
     document.querySelector('[data-chat-presence]')?.replaceChildren();
@@ -30,10 +36,13 @@ function chatConnect() {
   });
 }
 function chatMount() {
+  if(typeof dockMount==='function')dockMount();
   chatStatus();
   if(!chatSocket?.connected)return;
   const peer=page==='messages'&&location.hash.startsWith('#messages/')&&!location.hash.includes('?') ? socialThread?.peer.id : null;
-  if(peer)chatSocket.emit('chat:watch',{peerId:peer});
+  const peers=typeof dockChats!=='undefined' ? [...dockChats.entries()].filter(([,c])=>c.expanded).map(([id])=>id) : [];
+  if(peer)peers.push(peer);
+  if(peers.length)chatSocket.emit('chat:watch',{peerIds:[...new Set(peers)]});
   else chatSocket.emit('chat:leave');
 }
 async function chatSync() {
@@ -67,13 +76,13 @@ async function chatSend(f,data) {
   await api('/messages/'+data.recipient_id,'POST',{body:data.body,nonce:f.dataset.nonce});
   if(f.elements.body.value===data.body)f.elements.body.value='';
   delete f.dataset.nonce;delete f.dataset.sentBody;
-  if(chatSocket?.connected)chatSocket.emit('chat:typing',{active:false});
+  if(chatSocket?.connected)chatSocket.emit('chat:typing',{peerId:Number(data.recipient_id),active:false});
   if(location.hash.includes('?'))location.hash='messages/'+data.recipient_id;else await chatSync();
   await refreshUnread();
 }
 document.addEventListener('input',event=>{
   if(!event.target.matches('form[data-form="message"] textarea')||!chatSocket?.connected)return;
-  if(Date.now()-chatLastTyping>2000){chatSocket.emit('chat:typing',{active:true});chatLastTyping=Date.now();}
+  if(Date.now()-chatLastTyping>2000){chatSocket.emit('chat:typing',{peerId:socialThread?.peer.id,active:true});chatLastTyping=Date.now();}
 });
 document.addEventListener('change',async event=>{
   if(!event.target.matches('[data-chat-online]'))return;

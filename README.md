@@ -157,3 +157,9 @@ Deploy: update source, run npm install, and restart Wisp. Tables are created aut
 
 HTTPS/WSS protects network traffic. Messages remain readable in the application database; this release does not implement end-to-end encryption. No chat attachments, group chat, push notifications, or delivery/read receipts are included. Test production WebSocket connectivity through your tunnel after deployment.
 
+
+### Bottom chat dock (0.6.1)
+
+Approved members now have a persistent bottom-right Chat button. Expand it to see accepted friends, with opted-in online friends first. Select a friend or a Message link to open a separate conversation window. Up to three windows can remain open; close one to open another. Each window can be minimized, reopened, or closed independently. Windows and drafts stay intact while navigating the site, and are cleared on sign-out or membership restriction. A full browser reload clears windows and unsent drafts.
+
+New live conversation activity opens its own window while the site is visible. Existing minimized windows show a New marker; collapsed windows do not fetch or mark incoming messages read until expanded. The Chat button displays the unread count. If all three windows are occupied, additional conversations remain available through the inbox. Online visibility remains opt-in on the Messages page. The friends list refreshes while expanded. Small screens can scroll horizontally among conversation windows. Deployment: update source, npm install, and restart Wisp. No new configuration or database migration is required beyond 0.6.0.

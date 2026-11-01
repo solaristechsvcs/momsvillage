@@ -147,7 +147,10 @@ test('MySQL-backed community workflows and access controls', { skip: process.env
     await b('/chat/settings','PUT',{show_online:true});
     let presence=socketEvent(liveA,'chat:presence',e=>e.peerId===userB.id&&e.online);
     await watch(liveA,userB.id);await presence;
+    assert.equal((await a('/chat/online')).user_ids.includes(userB.id),true);
+    assert.equal((await c('/chat/online')).user_ids.includes(userB.id),false);
     await b('/chat/settings','PUT',{show_online:false});
+    assert.equal((await a('/chat/online')).user_ids.includes(userB.id),false);
     presence=socketEvent(liveA,'chat:presence',e=>e.peerId===userB.id&&!e.online);
     await watch(liveA,userB.id);await presence;
     let leaked=false;liveC.on('chat:message',()=>{leaked=true;});

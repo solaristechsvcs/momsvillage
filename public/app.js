@@ -51,6 +51,7 @@ async function load() {
   }
   if (route === 'guidelines') { history.replaceState(null, '', '#feed'); await load(); guidelines(); return; }
   page = route.startsWith('admin/') ? 'admin' : route.startsWith('messages/') ? 'messages' : route.startsWith('group/') ? 'group' : labels[route.split('?')[0]] ? route.split('?')[0] : 'feed';
+  if(typeof dockMount==='function')dockMount();
   if (!me) { landing(); return; }
   if (me.must_change_password) {
  $('#app').innerHTML=`<header>${logo}<button data-action="logout">Sign out</button></header><main class="landing"><section class="card"><h1>Choose your new password</h1><p>Replace your temporary password before continuing.</p>${form('password-change',field('current_password','Temporary password',{type:'password',max:72})+field('new_password','New password',{type:'password',max:72})+field('confirm_password','Confirm new password',{type:'password',max:72})+'<p class="hint">Use at least 12 characters and at most 72 UTF-8 bytes.</p>','Save new password')}</section></main>`;

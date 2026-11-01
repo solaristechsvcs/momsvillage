@@ -136,6 +136,7 @@ app.post('/api/admin/users/:id/password',requireApproved,requireAdmin,passwordLi
 app.use('/api', verificationRouter({ service:verificationService,requireApproved,requireAdmin }));
 app.use('/api', membershipRouter({ db, query, config, fail, requireApproved, requireAdmin }));
 app.use('/api', requireApproved);
+app.get('/api/chat/online',async(req,res)=>res.json({user_ids:await chat.online(req.user.id)}));
 const social = await socialRouter({ db, query, config, fail, onMessage:(a,b)=>chat?.message(a,b) });
 app.use('/api', social.router);
 app.patch('/api/profile', async (req, res) => {

@@ -110,6 +110,7 @@ async function refreshUnread() {
   if (me?.membership_status !== 'approved' || document.hidden) return;
   try {
     unread = await api('/unread');
+    if(typeof dockUnread==='function')dockUnread();
     for (const [key, count] of Object.entries(unread)) {
       const badge = document.querySelector(`[data-count="${key}"]`);
       if (badge) { badge.textContent = count ? String(count) : ''; badge.hidden = !count; }
