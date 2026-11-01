@@ -43,7 +43,7 @@ test('pending, declined and suspended applicants stay outside community UI until
     assert.equal(w.document.querySelector('.membership-gate script'),null);
     assert.ok(w.document.querySelector('.membership-gate').textContent.includes('<script>Review feedback</script>'));
     w.location.hash='members'; await delay(20);
-    assert.equal(calls.some(c=>c[0].startsWith('/api/members')),false);
+    assert.ok(calls.every(c=>['/api/session','/api/membership'].includes(c[0])));
     user.membership_status='declined'; application.status='declined';
     w.document.querySelector('[data-action="membership-refresh"]').click(); await waitFor(()=>w.document.querySelector('h1')?.textContent.includes('needs attention'));
     const f=w.document.querySelector('form[data-form="membership-application"]'); f.elements.application_reason.value='Updated application';
