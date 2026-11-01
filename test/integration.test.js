@@ -398,6 +398,9 @@ test('MySQL-backed community workflows and access controls', { skip: process.env
     assert.ok(olderLogs.logs.every(row=>row.id<logPage.logs[0].id));
     assert.ok(Array.isArray(await admin('/admin/reports')));
 
+    // Existing users sign in through the SQL COALESCE version projection.
+    await admin('/logout','POST');await admin('/session');
+    await admin('/login','POST',{email:'admin@example.com',password:'a-long-password-123'});await admin('/session');
     // Password resets revoke sessions and require a new password before any community API.
     const resetPath='/admin/users/'+userB.id+'/password';
     await a(resetPath,'POST',{temporary_password:'Temporary-pass-123',current_password:'a-long-password-123'},403);

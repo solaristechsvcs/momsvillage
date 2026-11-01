@@ -9,7 +9,7 @@ import { randomBytes, timingSafeEqual } from 'node:crypto';
 import { readFile,access } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { text, id, price } from './validation.js';
-import { authColumns, updatePassword } from './passwords.js';
+import { authColumns, updatePassword, sameAuthVersion } from './passwords.js';
 import { socialRouter } from './social.js';
 import { verificationSettings } from './verification-utils.js';
 import { VerificationService } from './verification-service.js';
@@ -70,7 +70,7 @@ const fail = (status, message) => { throw Object.assign(new Error(message), { st
 const requireAccount = async (req, res, next) => {
   if (!req.session.userId) return res.status(401).json({ error: 'Please sign in.' });
   const [user] = await query(`SELECT u.*,${authColumns()},EXISTS(SELECT 1 FROM member_verifications own_check WHERE own_check.user_id=u.id AND own_check.current_attempt_id IS NOT NULL) AS has_verification_data,a.status AS membership_status,${badgeColumns()} FROM users u LEFT JOIN membership_applications a ON a.user_id=u.id WHERE u.id=?`, [req.session.userId]);
-  if (!user || (req.session.authVersion ?? 0)!==user.auth_version) { req.session.destroy(()=>{}); return res.status(401).json({error:'Please sign in again.'}); }
+  if (!user || !sameAuthVersion(req.session.authVersion ?? 0,user.auth_version)) { req.session.destroy(()=>{}); return res.status(401).json({error:'Please sign in again.'}); }
   req.user = user; req.isAdmin = isAdmin(user); next();
 };
 const requireApproved = (req, res, next) => membershipStatus(req.user) === 'approved' ? next() : res.status(403).json({ error: 'Approved membership is required.', code: 'MEMBERSHIP_REQUIRED', membership_status: membershipStatus(req.user) });
@@ -78,7 +78,7 @@ const requireAdmin = (req, res, next) => req.isAdmin ? next() : res.status(403).
 app.get('/api/session', async (req, res) => {
   req.session.csrf ??= randomBytes(32).toString('hex');
   const [user] = req.session.userId ? await query(`SELECT u.*,${authColumns()},EXISTS(SELECT 1 FROM member_verifications own_check WHERE own_check.user_id=u.id AND own_check.current_attempt_id IS NOT NULL) AS has_verification_data,a.status AS membership_status,${badgeColumns()} FROM users u LEFT JOIN membership_applications a ON a.user_id=u.id WHERE u.id=?`, [req.session.userId]) : [];
-  if(user && (req.session.authVersion ?? 0)!==user.auth_version) { await new Promise((resolve,reject)=>req.session.regenerate(err=>err?reject(err):resolve())); req.session.csrf=randomBytes(32).toString('hex'); return res.json({csrf:req.session.csrf,user:null}); }
+  if(user && !sameAuthVersion(req.session.authVersion ?? 0,user.auth_version)) { await new Promise((resolve,reject)=>req.session.regenerate(err=>err?reject(err):resolve())); req.session.csrf=randomBytes(32).toString('hex'); return res.json({csrf:req.session.csrf,user:null}); }
   res.json({ csrf: req.session.csrf, user: user ? { ...publicUser(user), email: user.email, admin: isAdmin(user), membership_status: membershipStatus(user), has_verification_data: !!user.has_verification_data, must_change_password: !!user.must_change_password } : null, membership_policy: { ...membershipPolicy, invite_only: config.membership?.inviteOnly === true } });
 });
 app.use('/api', (req, res, next) => {
@@ -90,7 +90,7 @@ app.use('/api', (req, res, next) => {
 const authLimit = rateLimit({ windowMs: 15 * 60000, limit: 20, standardHeaders: 'draft-8', legacyHeaders: false });
 async function signIn(req, userId, authVersion=0) {
   await new Promise((resolve, reject) => req.session.regenerate(err => err ? reject(err) : resolve()));
-  req.session.userId = userId; req.session.authVersion = authVersion; req.session.csrf = randomBytes(32).toString('hex');
+  req.session.userId = userId; req.session.authVersion = Number(authVersion); req.session.csrf = randomBytes(32).toString('hex');
   await new Promise((resolve, reject) => req.session.save(err => err ? reject(err) : resolve()));
 }
 app.post('/api/register', authLimit, async (req, res) => {
