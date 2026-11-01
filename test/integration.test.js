@@ -79,6 +79,29 @@ test('MySQL-backed community workflows and access controls', { skip: process.env
     await b('/admin', 'GET', undefined, 403);
     await a('/profile', 'PATCH', { name: 'Mom A', city: 'Austin', bio: 'Hello village', avatar: '' });
     const profile = await b(`/members/${userA.id}`); assert.equal(profile.bio, 'Hello village'); assert.equal(profile.email, undefined);
+
+    await guest('/profile/children','GET',undefined,401);
+    const hiddenChild=await a('/profile/children','POST',{name:'Private nickname',age_value:4,age_unit:'years',gender:'boy',shared:false},201);
+    const sharedChild=await a('/profile/children','POST',{name:'Shared nickname',age_value:23,age_unit:'months',gender:'girl',shared:true},201);
+    const unknownChild=await a('/profile/children','POST',{name:null,age_value:null,age_unit:null,gender:'undisclosed',shared:true},201);
+    assert.equal((await a('/profile/children')).length,3);
+    let visibleChildren=(await b('/members/'+userA.id)).children;
+    assert.equal(visibleChildren.length,2);assert.equal(visibleChildren.some(c=>c.name==='Private nickname'),false);
+    assert.equal(visibleChildren.find(c=>c.name==='Shared nickname').age_value,23);
+    assert.equal((await admin('/admin/users/'+userA.id+'/profile')).children.length,2,'Admin profile must not bypass child privacy');
+    await b('/profile/children/'+hiddenChild.id,'PATCH',{name:'Spoof',age_value:1,age_unit:'years',gender:'girl',shared:true},404);
+    await b('/profile/children/'+hiddenChild.id,'DELETE',undefined,404);
+    await a('/profile/children','POST',{name:null,age_value:24,age_unit:'months',gender:'girl',shared:false},400);
+    await a('/profile/children','POST',{name:null,age_value:-1,age_unit:'years',gender:'girl',shared:false},400);
+    await a('/profile/children','POST',{name:null,age_value:null,age_unit:null,gender:'invalid',shared:false},400);
+    await a('/profile/children/'+sharedChild.id,'PATCH',{name:null,age_value:null,age_unit:null,gender:'undisclosed',shared:false});
+    assert.equal((await b('/members/'+userA.id)).children.length,1);
+    await b('/blocks/'+userA.id,'POST',{});
+    assert.equal((await b('/members/'+userA.id)).children.length,0,'Blocked viewers cannot see shared child data');
+    await b('/blocks/'+userA.id,'DELETE');
+    for(const child of [hiddenChild,sharedChild,unknownChild])await a('/profile/children/'+child.id,'DELETE');
+    assert.equal((await a('/profile/children')).length,0);
+
     const post = await a('/posts', 'POST', { body: 'First village conversation', image: '' }, 201);
     await b(`/content/post/${post.id}`, 'DELETE', undefined, 403);
     await b(`/posts/${post.id}/like`, 'POST', { active: true });

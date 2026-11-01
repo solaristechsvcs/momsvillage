@@ -1,12 +1,12 @@
 {
   "name": "momsvillage",
-  "version": "0.6.3",
+  "version": "0.7.0",
   "private": true,
   "type": "module",
   "scripts": {
     "start": "node server.js",
     "test": "node --test",
-    "check": "node --check server.js && node --check social.js && node --check public/app.js && node --check public/social-ui.js && node --check admin.js && node --check badges.js && node --check membership.js && node --check public/membership-ui.js && node --check verification-service.js && node --check verification-utils.js && node --check verification.js && node --check liveness-provider.js && node --check public/verification-ui.js && node --check passwords.js && node --check live-chat.js && node --check public/live-chat-ui.js && node --check public/chat-dock.js",
+    "check": "node --check server.js && node --check social.js && node --check public/app.js && node --check public/social-ui.js && node --check admin.js && node --check badges.js && node --check membership.js && node --check public/membership-ui.js && node --check verification-service.js && node --check verification-utils.js && node --check verification.js && node --check liveness-provider.js && node --check public/verification-ui.js && node --check passwords.js && node --check live-chat.js && node --check public/live-chat-ui.js && node --check public/chat-dock.js && node --check children.js && node --check public/children-ui.js",
     "build:verification": "node scripts/build-verification.mjs",
     "postinstall": "npm run build:verification"
   },

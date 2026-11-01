@@ -18,7 +18,7 @@ async function api(path, method = 'GET', data) {
   return result;
 }
 function notice(message) { $('#notice').textContent = message; clearTimeout(notice.timer); notice.timer = setTimeout(() => { $('#notice').textContent = ''; }, 5000); }
-function modal(title, html) { $('#modal-body').innerHTML = `<h2>${esc(title)}</h2>${html}`; if (!$('#modal').open) $('#modal').showModal(); }
+function modal(title, html, titleSuffix='') { $('#modal-body').innerHTML = `<h2>${esc(title)}${titleSuffix}</h2>${html}`; if (!$('#modal').open) $('#modal').showModal(); }
 function closeModal() { $('#modal').close(); $('#modal-body').innerHTML = ''; }
 function field(name, label, options = {}) {
   const { value = '', type = 'text', max = 200, required = true } = options;
@@ -86,6 +86,7 @@ async function load() {
       records = await api('/listings'); html = heading('A new home for old favorites', 'Buy, sell, and pass a little goodness forward.', 'new-listing', '+ List an item') + '<p class="hint">Community classifieds · Prices in USD · Arrange exchanges directly with sellers.</p><input class="search" id="search" type="search" aria-label="Search listings" placeholder="Search items or your city…"><div class="grid" id="cards">' + listingCards(records) + '</div>';
     } else if (page === 'profile') {
       html = heading('Your little corner', 'Let your village get to know you.') + `<div class="card"><div class="profile-cover"></div>${avatar(me)}${memberBadges(me)}${form('profile', field('name', 'Display name', { value: me.name, max: 80 }) + field('city', 'City or area', { value: me.city, max: 120, required: false }) + field('bio', 'About you', { type: 'textarea', value: me.bio, max: 2000, required: false }) + imageField('avatar', 'Profile picture', me.avatar) + '<p class="hint">These details are visible to signed-in members. Your email stays private.</p><button type="button" class="secondary" data-action="image-library">My image library</button>', 'Save profile')}</div>`;
+      if(typeof childrenSection==='function')html+=await childrenSection();
     } else if (page === 'admin') {
       html = await administrationPage(route);
     } else html = empty('This page is unavailable.', 'Choose a page from the navigation.');
@@ -230,7 +231,7 @@ function adminMemberRow(user) {
 }
 async function adminProfileModal(memberId) {
   const user = await api(`/admin/users/${memberId}/profile`);
-  modal(user.name, `<div class="profile-cover"></div>${avatar(user)}${memberBadges(user)}<p><span class="pill">${user.is_admin ? 'Administrator' : 'Member'}${user.banned ? ' / Suspended' : ''}</span></p><p class="muted">${esc(user.email)}<br>${esc(user.city || 'No city shared')}</p><p class="member-info">${esc(user.bio || 'No biography shared yet.')}</p><small>Joined ${esc(new Date(user.created_at).toLocaleDateString())}</small>`);
+  modal(user.name, `<div class="profile-cover"></div>${avatar(user)}${memberBadges(user)}<p><span class="pill">${user.is_admin ? 'Administrator' : 'Member'}${user.banned ? ' / Suspended' : ''}</span></p><p class="muted">${esc(user.email)}<br>${esc(user.city || 'No city shared')}</p><p class="member-info">${esc(user.bio || 'No biography shared yet.')}</p><small>Joined ${esc(new Date(user.created_at).toLocaleDateString())}</small>`,typeof sharedChildrenSection==='function'?sharedChildrenSection(user.children):'');
 }
 
 function memberBadges(user) {

@@ -18,7 +18,7 @@ function memberCard(user, friendship) {
 async function memberModal(memberId) {
   const user = await api(`/members/${memberId}`);
   const relationship = user.id !== me.id ? await api(`/relationships/${memberId}`) : null;
-  modal(user.name, `<div class="profile-cover"></div>${avatar(user)}${memberBadges(user)}<p class="muted">${esc(user.city || 'Part of the village')}</p><p class="member-info">${esc(user.bio || 'Still writing her story.')}</p><small>Joined ${esc(new Date(user.created_at).toLocaleDateString())}</small>${relationship ? `<div class="buttons member-controls">${connectionButtons(user, relationship.friendship, relationship.contact_allowed, relationship.blocked)}</div>` : '<p><a href="#profile">Edit my profile</a></p>'}`);
+  modal(user.name, `<div class="profile-cover"></div>${avatar(user)}${memberBadges(user)}<p class="muted">${esc(user.city || 'Part of the village')}</p><p class="member-info">${esc(user.bio || 'Still writing her story.')}</p><small>Joined ${esc(new Date(user.created_at).toLocaleDateString())}</small>${relationship ? `<div class="buttons member-controls">${connectionButtons(user, relationship.friendship, relationship.contact_allowed, relationship.blocked)}</div>` : '<p><a href="#profile">Edit my profile</a></p>'}`,typeof sharedChildrenSection==='function'?sharedChildrenSection(user.children):'');
 }
 async function socialPage(route) {
   if (page === 'members') {

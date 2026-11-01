@@ -12,6 +12,7 @@ import { readFile,access } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { text, id, price } from './validation.js';
 import { authColumns, updatePassword, sameAuthVersion } from './passwords.js';
+import {childrenRouter,sharedChildren} from './children.js';
 import { socialRouter } from './social.js';
 import { verificationSettings } from './verification-utils.js';
 import { VerificationService } from './verification-service.js';
@@ -34,6 +35,8 @@ const membershipSchema = await readFile(new URL('./membership-schema.sql', impor
 for (const statement of membershipSchema.split(';').map(s => s.trim()).filter(Boolean)) await db.query(statement);
 const verificationSchema = await readFile(new URL('./verification-schema.sql', import.meta.url), 'utf8');
 for (const statement of verificationSchema.split(';').map(s => s.trim()).filter(Boolean)) await db.query(statement);
+const childrenSchema=await readFile(new URL('./children-schema.sql',import.meta.url),'utf8');
+for(const statement of childrenSchema.split(';').map(s=>s.trim()).filter(Boolean))await db.query(statement);
 await initializeBadgeStorage(db, config.mysql.database);
 await initializeAdminRoles(db, config);
 await initializeMembership(db);
@@ -136,6 +139,7 @@ app.post('/api/admin/users/:id/password',requireApproved,requireAdmin,passwordLi
 app.use('/api', verificationRouter({ service:verificationService,requireApproved,requireAdmin }));
 app.use('/api', membershipRouter({ db, query, config, fail, requireApproved, requireAdmin }));
 app.use('/api', requireApproved);
+app.use('/api',childrenRouter({db,query}));
 app.get('/api/chat/online',async(req,res)=>res.json({user_ids:await chat.online(req.user.id)}));
 const social = await socialRouter({ db, query, config, fail, onMessage:(a,b)=>chat?.message(a,b) });
 app.use('/api', social.router);
@@ -145,7 +149,7 @@ app.patch('/api/profile', async (req, res) => {
 });
 app.get('/api/members/:id', async (req, res) => {
   const [user] = await query(`SELECT u.id,u.name,u.city,u.bio,u.avatar,u.created_at,${badgeColumns()} FROM users u WHERE u.id=? AND u.banned=FALSE AND ${approvedMemberSql('u')}`, [id(req.params.id)]);
-  if (!user) fail(404, 'Member not found.'); res.json(user);
+  if (!user) fail(404, 'Member not found.'); user.children=await sharedChildren(query,user.id,req.user.id);res.json(user);
 });
 app.get('/api/posts', async (req, res) => {
   const groupId = req.query.group ? id(req.query.group) : null;
@@ -281,7 +285,7 @@ app.get('/api/admin/users/:id/profile', requireAdmin, async (req, res) => {
   const user = await existing('users', req.params.id);
   const [badges] = await query(`SELECT ${badgeColumns()} FROM users u WHERE u.id=?`, [user.id]);
   Object.assign(user, badges);
-  res.json({ ...publicUser(user), email: user.email, is_admin: !!user.is_admin, banned: !!user.banned });
+  res.json({ ...publicUser(user), email: user.email, is_admin: !!user.is_admin, banned: !!user.banned, children:await sharedChildren(query,user.id,req.user.id) });
 });
 app.patch('/api/admin/users/:id/role', requireAdmin, async (req, res) => {
   if (typeof req.body.is_admin !== 'boolean') fail(400, 'Specify administrator access as true or false.');

@@ -169,3 +169,11 @@ New live conversation activity opens its own window while the site is visible. E
 Phone layouts now have a collapsible Menu, wrapping content and touch-sized controls, single-column cards, horizontally scrollable Administration tabs, and viewport-sized dialogs. Forms use 16px text on phones to avoid focus zoom. The chat dock opens full-width conversation cards on phones; opening another window minimizes the previous one while keeping its draft and New indicator. Chat adjusts to viewport and keyboard size and respects device safe areas. Tablets retain the sidebar and desktop layouts keep multiple chat windows.
 
 Update files, npm install, restart Wisp, and hard refresh. No configuration changes are needed. CI checks Chromium layouts at 320, 375, 390, 768, and 1280 pixels, including menus, password dialogs, chat windows, and page overflow. Native iOS/Android keyboard and camera behavior still benefit from testing on physical devices.
+
+### Children on profiles (0.7.0)
+
+My profile includes an optional Children section. Add, edit, or remove up to 20 entries, with a name/nickname, age in whole years or months, and Boy, Girl, or Rather not say for gender. Name and age also support Rather not say. Age in months is limited to 0–23; age in years accepts 0–120. Ages are entered manually; no birthdate or child photograph is collected.
+
+Entries are private by default. Enable Show this entry on my profile to approved members for each entry you wish to share. Shared entries appear as compact age badges beside the profile name: blue for boys, pink for girls, and a rainbow icon for undisclosed gender. For example, 23 months displays 1y11m and 9 years displays 9y. Name and full age/gender details are available in the badge's accessible description/tooltip. Private entries are excluded from member and administrator profile responses; blocked viewers cannot see shared entries. Removing or switching an entry to private takes effect on subsequent profile requests.
+
+Deploy source and restart Wisp; profile_children is created automatically. No config changes are required. Tests cover ownership, validation, sharing, privacy, removal, compact age labels, and the mobile editor.
