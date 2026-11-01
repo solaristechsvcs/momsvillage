@@ -10,6 +10,7 @@ import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { text, id, price } from './validation.js';
 import { socialRouter } from './social.js';
+import { membershipRouter, initializeMembership, registerMembership, membershipStatus, membershipPolicy, approvedMemberSql } from './membership.js';
 import { changeMemberAccess, initializeAdminRoles } from './admin.js';
 import { badgeColumns, initializeBadgeStorage, assignableBadges } from './badges.js';
 const { version } = JSON.parse(await readFile(new URL('./package.json', import.meta.url), 'utf8'));
@@ -23,8 +24,11 @@ const schema = await readFile(new URL('./schema.sql', import.meta.url), 'utf8');
 for (const statement of schema.split(';').map(s => s.trim()).filter(Boolean)) await db.query(statement);
 const socialSchema = await readFile(new URL('./social-schema.sql', import.meta.url), 'utf8');
 for (const statement of socialSchema.split(';').map(s => s.trim()).filter(Boolean)) await db.query(statement);
+const membershipSchema = await readFile(new URL('./membership-schema.sql', import.meta.url), 'utf8');
+for (const statement of membershipSchema.split(';').map(s => s.trim()).filter(Boolean)) await db.query(statement);
 await initializeBadgeStorage(db, config.mysql.database);
 await initializeAdminRoles(db, config);
+await initializeMembership(db);
 const query = async (sql, args = []) => (await db.execute(sql, args))[0];
 const app = express();
 app.disable('x-powered-by');
@@ -38,20 +42,21 @@ app.use(session({ name: 'mv.sid', secret: config.sessionSecret, store: sessionSt
 app.use('/api', rateLimit({ windowMs: 60000, limit: 180, standardHeaders: 'draft-8', legacyHeaders: false }));
 app.use('/api', (req, res, next) => { res.set('Cache-Control', 'no-store'); next(); });
 const adminEmail = email => (config.adminEmails ?? []).map(e => e.toLowerCase()).includes(email.toLowerCase());
-const isAdmin = user => !!user.is_admin;
+const isAdmin = user => !!user.is_admin && membershipStatus(user) === 'approved';
 const publicUser = user => ({ id: user.id, name: user.name, city: user.city, bio: user.bio, avatar: user.avatar, created_at: user.created_at, staff_badge: !!user.is_admin, ...Object.fromEntries(Object.keys(assignableBadges).map(badge => [`${badge}_badge`, !!user[`${badge}_badge`]])) });
 const fail = (status, message) => { throw Object.assign(new Error(message), { status }); };
-const requireUser = async (req, res, next) => {
+const requireAccount = async (req, res, next) => {
   if (!req.session.userId) return res.status(401).json({ error: 'Please sign in.' });
-  const [user] = await query(`SELECT u.*,${badgeColumns()} FROM users u WHERE u.id=?`, [req.session.userId]);
-  if (!user || user.banned) return res.status(403).json({ error: 'This account is unavailable.' });
+  const [user] = await query(`SELECT u.*,a.status AS membership_status,${badgeColumns()} FROM users u LEFT JOIN membership_applications a ON a.user_id=u.id WHERE u.id=?`, [req.session.userId]);
+  if (!user) return res.status(401).json({ error: 'Please sign in.' });
   req.user = user; req.isAdmin = isAdmin(user); next();
 };
+const requireApproved = (req, res, next) => membershipStatus(req.user) === 'approved' ? next() : res.status(403).json({ error: 'Approved membership is required.', code: 'MEMBERSHIP_REQUIRED', membership_status: membershipStatus(req.user) });
 const requireAdmin = (req, res, next) => req.isAdmin ? next() : res.status(403).json({ error: 'Administrator access required.' });
 app.get('/api/session', async (req, res) => {
   req.session.csrf ??= randomBytes(32).toString('hex');
-  const [user] = req.session.userId ? await query(`SELECT u.*,${badgeColumns()} FROM users u WHERE u.id=?`, [req.session.userId]) : [];
-  res.json({ csrf: req.session.csrf, user: user && !user.banned ? { ...publicUser(user), email: user.email, admin: isAdmin(user) } : null });
+  const [user] = req.session.userId ? await query(`SELECT u.*,a.status AS membership_status,${badgeColumns()} FROM users u LEFT JOIN membership_applications a ON a.user_id=u.id WHERE u.id=?`, [req.session.userId]) : [];
+  res.json({ csrf: req.session.csrf, user: user ? { ...publicUser(user), email: user.email, admin: isAdmin(user), membership_status: membershipStatus(user) } : null, membership_policy: { ...membershipPolicy, invite_only: config.membership?.inviteOnly === true } });
 });
 app.use('/api', (req, res, next) => {
   if (['GET', 'HEAD', 'OPTIONS'].includes(req.method)) return next();
@@ -76,18 +81,20 @@ app.post('/api/register', authLimit, async (req, res) => {
     const expected = Buffer.from(config.adminRegistrationCode ?? '');
     if (expected.length < 32 || supplied.length !== expected.length || !timingSafeEqual(supplied, expected)) fail(403, 'This address is reserved. Enter the administrator setup code.');
   }
-  const result = await query('INSERT INTO users(name,email,password,city,bio,is_admin) VALUES(?,?,?,?,?,?)', [name, email, await bcrypt.hash(password, 12), text(req.body.city ?? '', 120, false), '', requestedAdmin]);
-  await signIn(req, result.insertId); res.status(201).json({ ok: true });
+  const userId = await registerMembership({ db, body: req.body, passwordHash: await bcrypt.hash(password, 12), email, name, requestedAdmin, config, fail });
+  await signIn(req, userId); res.status(201).json({ ok: true });
 });
 app.post('/api/login', authLimit, async (req, res) => {
   const email = text(req.body.email, 254).toLowerCase(), password = text(req.body.password, 200);
   const [user] = await query('SELECT * FROM users WHERE email=?', [email]);
   const valid = await bcrypt.compare(password, user?.password ?? '$2b$12$R9h/cIPz0gi.URNNX3kh2OPST9/PgBkqquzi.Ss7KIUgO2t0jWMUW');
-  if (!user || !valid || user.banned) fail(401, 'Incorrect email or password, or account unavailable.');
+  if (!user || !valid) fail(401, 'Incorrect email or password, or account unavailable.');
   await signIn(req, user.id); res.json({ ok: true });
 });
 app.post('/api/logout', (req, res, next) => req.session.destroy(err => { if (err) return next(err); res.clearCookie('mv.sid'); res.json({ ok: true }); }));
-app.use('/api', requireUser);
+app.use('/api', requireAccount);
+app.use('/api', membershipRouter({ db, query, config, fail, requireApproved, requireAdmin }));
+app.use('/api', requireApproved);
 const social = await socialRouter({ db, query, config, fail });
 app.use('/api', social.router);
 app.patch('/api/profile', async (req, res) => {
@@ -95,7 +102,7 @@ app.patch('/api/profile', async (req, res) => {
   res.json({ ok: true });
 });
 app.get('/api/members/:id', async (req, res) => {
-  const [user] = await query(`SELECT u.id,u.name,u.city,u.bio,u.avatar,u.created_at,${badgeColumns()} FROM users u WHERE u.id=? AND u.banned=FALSE`, [id(req.params.id)]);
+  const [user] = await query(`SELECT u.id,u.name,u.city,u.bio,u.avatar,u.created_at,${badgeColumns()} FROM users u WHERE u.id=? AND u.banned=FALSE AND ${approvedMemberSql('u')}`, [id(req.params.id)]);
   if (!user) fail(404, 'Member not found.'); res.json(user);
 });
 app.get('/api/posts', async (req, res) => {
@@ -104,16 +111,16 @@ app.get('/api/posts', async (req, res) => {
   const posts = await query(`SELECT p.*,u.name,u.avatar,${badgeColumns()},
     (SELECT COUNT(*) FROM likes WHERE post_id=p.id) AS like_count,
     EXISTS(SELECT 1 FROM likes WHERE post_id=p.id AND user_id=?) AS liked,
-    (SELECT COUNT(*) FROM comments cc JOIN users cu ON cu.id=cc.user_id WHERE cc.post_id=p.id AND cu.banned=FALSE) AS comment_count,
+    (SELECT COUNT(*) FROM comments cc JOIN users cu ON cu.id=cc.user_id WHERE cc.post_id=p.id AND cu.banned=FALSE AND ${approvedMemberSql('cu')}) AS comment_count,
     g.name AS group_name FROM posts p JOIN users u ON u.id=p.user_id LEFT JOIN community_groups g ON g.id=p.group_id
-    WHERE u.banned=FALSE ${postId ? 'AND p.id=?' : groupId ? 'AND p.group_id=?' : 'AND p.group_id IS NULL'} ORDER BY p.id DESC LIMIT 50`, postId ? [req.user.id, postId] : groupId ? [req.user.id, groupId] : [req.user.id]);
+    WHERE u.banned=FALSE AND ${approvedMemberSql('u')} ${postId ? 'AND p.id=?' : groupId ? 'AND p.group_id=?' : 'AND p.group_id IS NULL'} ORDER BY p.id DESC LIMIT 50`, postId ? [req.user.id, postId] : groupId ? [req.user.id, groupId] : [req.user.id]);
   if (posts.length) {
     const postIds = posts.map(post => post.id), placeholders = postIds.map(() => '?').join(',');
     const latest = await query(`SELECT c.*,cu.name,cu.avatar,${badgeColumns('cu')} FROM comments c
       JOIN users cu ON cu.id=c.user_id
       JOIN (SELECT MAX(cc.id) AS latest_id FROM comments cc JOIN users author ON author.id=cc.user_id
-        WHERE cc.post_id IN (${placeholders}) AND author.banned=FALSE GROUP BY cc.post_id) newest ON newest.latest_id=c.id
-      WHERE cu.banned=FALSE`, postIds);
+        WHERE cc.post_id IN (${placeholders}) AND author.banned=FALSE AND ${approvedMemberSql('author')} GROUP BY cc.post_id) newest ON newest.latest_id=c.id
+      WHERE cu.banned=FALSE AND ${approvedMemberSql('cu')}`, postIds);
     const previews = new Map(latest.map(comment => [comment.post_id, comment]));
     for (const post of posts) post.latest_comment = previews.get(post.id) ?? null;
   }
@@ -141,7 +148,7 @@ app.post('/api/posts/:id/like', async (req, res) => {
 app.get('/api/posts/:id/comments', async (req, res) => {
   await existing('posts', req.params.id);
   const before = req.query.before ? id(req.query.before) : null;
-  const comments = await query(`SELECT c.*,u.name,u.avatar,${badgeColumns()} FROM comments c JOIN users u ON u.id=c.user_id WHERE c.post_id=? AND u.banned=FALSE ${before ? 'AND c.id<?' : ''} ORDER BY c.id DESC LIMIT 100`, [id(req.params.id), ...(before ? [before] : [])]);
+  const comments = await query(`SELECT c.*,u.name,u.avatar,${badgeColumns()} FROM comments c JOIN users u ON u.id=c.user_id WHERE c.post_id=? AND u.banned=FALSE AND ${approvedMemberSql('u')} ${before ? 'AND c.id<?' : ''} ORDER BY c.id DESC LIMIT 100`, [id(req.params.id), ...(before ? [before] : [])]);
   res.json(comments.reverse());
 });
 app.post('/api/posts/:id/comments', async (req, res) => {
@@ -150,7 +157,7 @@ app.post('/api/posts/:id/comments', async (req, res) => {
   await social.notify(post.user_id, req.user.id, 'comment', post.id); res.status(201).json({ ok: true });
 });
 app.get('/api/groups', async (req, res) => res.json(await query(`SELECT g.*,u.name AS owner_name,(SELECT COUNT(*) FROM memberships WHERE group_id=g.id) AS members,
-  EXISTS(SELECT 1 FROM memberships WHERE group_id=g.id AND user_id=?) AS joined FROM community_groups g JOIN users u ON u.id=g.owner_id WHERE u.banned=FALSE ORDER BY g.id DESC LIMIT 100`, [req.user.id])));
+  EXISTS(SELECT 1 FROM memberships WHERE group_id=g.id AND user_id=?) AS joined FROM community_groups g JOIN users u ON u.id=g.owner_id WHERE u.banned=FALSE AND ${approvedMemberSql('u')} ORDER BY g.id DESC LIMIT 100`, [req.user.id])));
 app.post('/api/groups', async (req, res) => {
   const connection = await db.getConnection();
   try {
@@ -167,7 +174,7 @@ app.post('/api/groups/:id/join', async (req, res) => {
   res.json({ ok: true });
 });
 app.get('/api/events', async (req, res) => res.json(await query(`SELECT e.*,u.name,${badgeColumns()},(SELECT COUNT(*) FROM rsvps WHERE event_id=e.id) AS attendees,
-  EXISTS(SELECT 1 FROM rsvps WHERE event_id=e.id AND user_id=?) AS going FROM events e JOIN users u ON u.id=e.user_id WHERE u.banned=FALSE AND e.starts_at>=UTC_TIMESTAMP() ORDER BY e.starts_at LIMIT 100`, [req.user.id])));
+  EXISTS(SELECT 1 FROM rsvps WHERE event_id=e.id AND user_id=?) AS going FROM events e JOIN users u ON u.id=e.user_id WHERE u.banned=FALSE AND ${approvedMemberSql('u')} AND e.starts_at>=UTC_TIMESTAMP() ORDER BY e.starts_at LIMIT 100`, [req.user.id])));
 app.post('/api/events', async (req, res) => {
   const starts = new Date(req.body.starts_at);
   if (!Number.isFinite(starts.getTime()) || starts <= new Date()) fail(400, 'Choose a future date and time.');
@@ -181,7 +188,7 @@ app.post('/api/events/:id/rsvp', async (req, res) => {
   else await query('DELETE FROM rsvps WHERE event_id=? AND user_id=?', [event.id, req.user.id]);
   res.json({ ok: true });
 });
-app.get('/api/listings', async (req, res) => res.json(await query(`SELECT l.*,u.name,${badgeColumns()} FROM listings l JOIN users u ON u.id=l.user_id WHERE u.banned=FALSE ORDER BY l.sold,l.id DESC LIMIT 100`)));
+app.get('/api/listings', async (req, res) => res.json(await query(`SELECT l.*,u.name,${badgeColumns()} FROM listings l JOIN users u ON u.id=l.user_id WHERE u.banned=FALSE AND ${approvedMemberSql('u')} ORDER BY l.sold,l.id DESC LIMIT 100`)));
 app.post('/api/listings', async (req, res) => {
   await social.withImage(req.user.id, req.body.image, (execute, url) => execute('INSERT INTO listings(user_id,title,description,price,city,image,contact) VALUES(?,?,?,?,?,?,?)', [req.user.id, text(req.body.title, 140), text(req.body.description, 3000), price(req.body.price), text(req.body.city, 120), url, text(req.body.contact, 250)]));
   res.status(201).json({ ok: true });
@@ -215,7 +222,7 @@ app.post('/api/reports', async (req, res) => {
 });
 app.get('/api/admin', requireAdmin, async (req, res) => {
   const term = text(req.query.q ?? '', 100, false);
-  const users = await query(`SELECT u.id,u.name,u.email,u.city,u.avatar,u.banned,u.is_admin,u.created_at,${badgeColumns()} FROM users u WHERE u.name LIKE ? OR u.email LIKE ? ORDER BY u.id DESC LIMIT 200`, [`%${term}%`, `%${term}%`]);
+  const users = await query(`SELECT u.id,u.name,u.email,u.city,u.avatar,u.banned,u.is_admin,a.status AS membership_status,u.created_at,${badgeColumns()} FROM users u LEFT JOIN membership_applications a ON a.user_id=u.id WHERE u.name LIKE ? OR u.email LIKE ? ORDER BY u.id DESC LIMIT 200`, [`%${term}%`, `%${term}%`]);
   const reports = await query('SELECT r.*,u.name FROM reports r JOIN users u ON u.id=r.user_id WHERE resolved=FALSE ORDER BY r.id DESC LIMIT 200');
   res.json({ users, reports });
 });

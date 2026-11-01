@@ -11,6 +11,36 @@ A community for moms: profiles, a discussion feed, local groups, events, a marke
 
 The new navigation includes **Find moms**, **Friends**, **Messages**, and **Notifications**. Badge counts refresh every 30 seconds while the page is visible; conversations have a Refresh button. These are in-app updates, not browser push notifications.
 
+## Membership approval rollout (0.4.0)
+
+This release makes the community private to approved members. Update application files, preserve your existing config.js and uploads directory, install dependencies and restart. Startup creates the new membership tables automatically; no manual SQL import or external AI account is needed.
+
+**Existing active administrators retain access. Every existing non-admin account enters Pending review.** Their accounts, messages, uploads and community content are preserved. Existing members must sign in, submit their application and be approved before regaining community access. Pending/declined authors and their comments/profiles are hidden from normal community lists. Administrative profile previews remain available for review. Later restarts preserve all membership decisions.
+
+New applicants self-confirm they meet the adult mothers-only membership policy and explain what they seek from the community. Application answers, referral information and review messages are private to the applicant and administrators. No children’s information, identity documents, photos, or gender classification are requested. Membership approval records an administrator's admission decision; it is not proof of gender or parenthood.
+
+- Pending and Declined accounts can sign in, read their own status/feedback, update/resubmit an application, and sign out. They cannot access member content, directories, protected photos, conversations or invitations through the interface or API.
+- Approved members have normal community access. Administrators may decline membership or request more information later; restrictions apply on the next request.
+- Suspended accounts may sign in to see their status but cannot submit applications or access the community. Restoring an account preserves its underlying membership decision.
+- Bootstrap registration with a reserved administrator email and valid setup code remains available so a new installation can be administered. Regular accounts cannot bypass review with role/status fields or an invitation.
+- Granting administrator access and badges requires approved, unsuspended membership.
+
+Use **Review applications** in the admin navigation to approve, decline, or request more information. Feedback is visible to the applicant. Each decision checks the application's revision so a changed application cannot be approved from a stale review. Review actions are recorded in admin_audit. In Administration, **Review membership** opens a specific member's application, including older accounts outside the latest queue page. Revoke admin privileges before restricting an administrator's membership.
+
+Approved members can create invitations from **Invitations**. Codes expire after 14 days, can be redeemed once and are shown only at creation. Only a SHA-256 hash and a short suffix are stored. Each member can have 5 active invitations and create 20 per week. Applicants can supply a code when registering or submitting an application; invitation redemption and account/application creation are atomic. Invalid, expired, revoked or used codes are rejected. An issuer must still be approved and unsuspended at redemption. Invitations do not auto-approve anyone.
+
+Members can revoke their own unused codes; admins can revoke any unused code from the review page's recent invitation list. Revoking a used code does not change the applicant's membership: review that application directly.
+
+Invitations are optional by default. For invitation-only applications, add this configuration and restart:
+
+```js
+membership: { inviteOnly: true },
+```
+
+Existing configuration files work without this key. Existing approved members retain access when enabling invitation-only applications; a new approval requires an attached invitation. Bootstrap administrators are exempt. Applicants with an existing attached invitation can resubmit without a new code.
+
+Community lists and review queues are bounded as documented below (up to 200 applications/invitations per admin view). No email notifications or automated liveness service are included in this phase; applicants use Check application status to see decisions.
+
 ## Requirements
 
 - Node.js 22 or later and npm
@@ -40,7 +70,7 @@ For Docker: `docker build -t momsvillage .`, then `docker run -d --name momsvill
 
 The new social navigation is visible after signing in; the public landing page stays similar. Check `/version` to identify the running application release. Version 0.2.1 adds versioned CSS/JavaScript URLs, disables browser/CDN caching of application assets at the origin, and prints the release in the startup log.
 
-After copying files, install dependencies and fully restart Wisp. The current log should say `Moms Village v0.3.3 listening on port ...`. If `/version` is missing or reports an older version, check the running container, application directory and Cloudflare Tunnel destination. If the origin is current but the public domain is stale, purge the site's Cloudflare cache and ensure custom cache rules respect origin headers or bypass caching for this app, particularly `/api/*` and `/version`. Origin headers cannot invalidate content that a proxy already cached or override a proxy configured to ignore them.
+After copying files, install dependencies and fully restart Wisp. The current log should say `Moms Village v0.4.0 listening on port ...`. If `/version` is missing or reports an older version, check the running container, application directory and Cloudflare Tunnel destination. If the origin is current but the public domain is stale, purge the site's Cloudflare cache and ensure custom cache rules respect origin headers or bypass caching for this app, particularly `/api/*` and `/version`. Origin headers cannot invalidate content that a proxy already cached or override a proxy configured to ignore them.
 
 ## Administrator roles (0.3)
 
@@ -87,9 +117,9 @@ Each feed/group post displays only its newest visible comment below the action b
 
 ## Privacy and current scope
 
-Community content, profiles, groups and marketplace contact instructions are visible to signed-in members. All groups are open; group membership controls creating group posts. Account email addresses are visible only to their owner and administrators. Private message APIs return only the current member's conversations; staff can view an individual message only through a report. Database operators can access stored records: messages are not end-to-end encrypted. Blocking prevents contact and notifications but does not hide shared community posts, group activity or external seller contact information. Suspended accounts cannot access member endpoints and their authored content is hidden from the main lists. Moderators can inspect reported content even if its author is suspended.
+Community content, profiles, groups and marketplace contact instructions are visible to approved members. All groups are open to approved members; group membership controls creating group posts. Account email addresses are visible only to their owner and administrators. Private message APIs return only the current member's conversations; staff can view an individual message only through a report. Database operators can access stored records: messages are not end-to-end encrypted. Blocking prevents contact and notifications but does not hide shared community posts, group activity or external seller contact information. Suspended accounts cannot access member endpoints and their authored content is hidden from the main lists. Moderators can inspect reported content even if its author is suspended.
 
-Images can be uploaded directly or supplied as external HTTPS URLs. External hosts may receive visitors' IP addresses; avoid URLs that expose private tokens. Uploads are visible to signed-in members, including anyone who has their URL. Uploaded images may only be attached by their owner. Storage is limited to 100 MB per member and 2 GB across the installation. Delete unused images from **My profile → My image library**; attached images must be removed from their content before deletion. Unpublished uploads remain in this library and count toward limits. Backups and files left by an interrupted upload may need operator cleanup.
+Images can be uploaded directly or supplied as external HTTPS URLs. External hosts may receive visitors' IP addresses; avoid URLs that expose private tokens. Uploads are visible to approved members, including anyone who has their URL. Uploaded images may only be attached by their owner. Storage is limited to 100 MB per member and 2 GB across the installation. Delete unused images from **My profile → My image library**; attached images must be removed from their content before deletion. Unpublished uploads remain in this library and count toward limits. Backups and files left by an interrupted upload may need operator cleanup.
 
 No child profiles, exact-location tracking, payments, shipping, browser push notifications, email verification, password recovery or automated content moderation are included yet. Marketplace transactions are arranged outside the app. Add email verification/recovery and a production privacy policy before broad public onboarding.
 

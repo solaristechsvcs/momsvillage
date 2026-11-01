@@ -105,7 +105,7 @@ document.addEventListener('change', async event => {
   finally { delete f.dataset.uploading; submit.disabled = false; input.disabled = false; input.value = ''; }
 });
 async function refreshUnread() {
-  if (!me || document.hidden) return;
+  if (me?.membership_status !== 'approved' || document.hidden) return;
   try {
     unread = await api('/unread');
     for (const [key, count] of Object.entries(unread)) {

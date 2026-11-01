@@ -9,7 +9,7 @@ test('social navigation, requests, conversations, notifications and photo forms'
   const dom = new JSDOM(html, { url: 'https://example.com/#members?q=Austin', runScripts: 'outside-only', pretendToBeVisual: true });
   const w = dom.window, calls = [];
   const nativeClose = w.close;
-  const self = { id: 1, name: 'Mom A', city: 'Austin', bio: '', avatar: '', admin: false };
+  const self = { membership_status:'approved', id: 1, name: 'Mom A', city: 'Austin', bio: '', avatar: '', admin: false };
   const peer = { id: 2, name: 'Mom B', city: 'Austin', bio: '<script>bad()</script>', avatar: '', staff_badge: true, developer_badge: true, founding_member_badge: true, tester_badge: true };
   w.HTMLDialogElement.prototype.showModal = function () { this.setAttribute('open', ''); };
   w.HTMLDialogElement.prototype.close = function () { this.removeAttribute('open'); };
@@ -41,7 +41,7 @@ test('social navigation, requests, conversations, notifications and photo forms'
   const waitFor = async check => { for (let n = 0; n < 100; n++) { if (check()) return; await delay(10); } assert.fail('UI did not reach expected state: ' + w.document.body.textContent.slice(-1000)); };
   const go = async hash => { w.location.hash = hash; await delay(20); };
   try {
-    w.eval((await readFile(new URL('../public/social-ui.js', import.meta.url), 'utf8')) + '\n' + (await readFile(new URL('../public/app.js', import.meta.url), 'utf8')));
+    w.eval((await readFile(new URL('../public/membership-ui.js', import.meta.url), 'utf8')) + '\n' + (await readFile(new URL('../public/social-ui.js', import.meta.url), 'utf8')) + '\n' + (await readFile(new URL('../public/app.js', import.meta.url), 'utf8')));
     assert.equal(w.close, nativeClose, 'Application helpers must preserve the browser window.close API.');
     await waitFor(() => w.document.querySelector('.member-card'));
     assert.ok(calls.some(c => c[0] === '/api/members?q=Austin'));
@@ -88,8 +88,8 @@ test('admin member profiles and confirmed role changes', { skip: process.env.MV_
   const { JSDOM } = await import('jsdom');
   const dom = new JSDOM(await readFile(new URL('../public/index.html', import.meta.url), 'utf8'), { url: 'https://example.com/#admin', runScripts: 'outside-only', pretendToBeVisual: true });
   const w = dom.window, nativeClose = w.close, calls = [];
-  const owner = { id: 1, name: 'Owner', email: 'owner@example.com', admin: true, is_admin: true, staff_badge: true, city: '', avatar: '' };
-  const users = [owner, { id: 2, name: 'New admin', email: 'new@example.com', is_admin: false, banned: false, city: '', avatar: '' }, { id: 3, name: 'Suspended mom', email: 'suspended@example.com', is_admin: false, banned: true, city: '', avatar: '', bio: '<script>unsafe()</script>' }];
+  const owner = { membership_status:'approved', id: 1, name: 'Owner', email: 'owner@example.com', admin: true, is_admin: true, staff_badge: true, city: '', avatar: '' };
+  const users = [owner, { membership_status:'approved', id: 2, name: 'New admin', email: 'new@example.com', is_admin: false, banned: false, city: '', avatar: '' }, { membership_status:'approved', id: 3, name: 'Suspended mom', email: 'suspended@example.com', is_admin: false, banned: true, city: '', avatar: '', bio: '<script>unsafe()</script>' }];
   w.HTMLDialogElement.prototype.showModal = function () { this.setAttribute('open', ''); };
   w.HTMLDialogElement.prototype.close = function () { this.removeAttribute('open'); };
   w.fetch = async (url, opts = {}) => {
@@ -106,7 +106,7 @@ test('admin member profiles and confirmed role changes', { skip: process.env.MV_
   };
   const waitFor = async check => { for (let n = 0; n < 100; n++) { if (check()) return; await delay(10); } assert.fail('Admin UI did not reach expected state.'); };
   try {
-    w.eval((await readFile(new URL('../public/social-ui.js', import.meta.url), 'utf8')) + '\n' + (await readFile(new URL('../public/app.js', import.meta.url), 'utf8')));
+    w.eval((await readFile(new URL('../public/membership-ui.js', import.meta.url), 'utf8')) + '\n' + (await readFile(new URL('../public/social-ui.js', import.meta.url), 'utf8')) + '\n' + (await readFile(new URL('../public/app.js', import.meta.url), 'utf8')));
     await waitFor(() => w.document.querySelector('[data-action="admin-role"][data-id="2"]'));
     assert.equal(w.document.querySelector('[data-action="admin-role"][data-id="3"]').disabled, true);
     w.document.querySelector('[data-action="admin-role"][data-id="2"]').click();

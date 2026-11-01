@@ -42,6 +42,7 @@ test('MySQL-backed community workflows and access controls', { skip: process.env
       let cookie = '', csrf = '';
       return async (path, method = 'GET', body, status = 200, withCsrf = true) => {
         console.log('[integration]', method, path);
+        if (path === '/register') body = { eligibility_confirmed:true, application_reason:'I am a mother looking for a supportive community.', ...body };
         const multipart = body instanceof FormData;
         const r = await fetch(base + '/api' + path, { signal: AbortSignal.timeout(10000), method, headers: { cookie, 'x-forwarded-for': proxyAddress, ...(!multipart ? { 'Content-Type': 'application/json' } : {}), ...(withCsrf ? { 'x-csrf-token': csrf } : {}) }, body: body ? (multipart ? body : JSON.stringify(body)) : undefined }).catch(error => { throw new Error(`${method} ${path}: ${error.message}`); });
         const setCookie = r.headers.get('set-cookie'); if (setCookie) cookie = setCookie.split(';')[0];
@@ -50,6 +51,11 @@ test('MySQL-backed community workflows and access controls', { skip: process.env
       };
     }
     const a = client(), b = client(), admin = client(), guest = client();
+    async function approveMember(member, userId) {
+      const own = await member('/membership');
+      await admin('/admin/membership-applications/' + userId, 'PATCH', { action:'approve',revision:own.application.revision,message:'' });
+    }
+
     await guest('/posts', 'GET', undefined, 401);
     await a('/session');
     await a('/register', 'POST', { name: 'Mom A', email: 'a@example.com', password: 'a-long-password-123', agree: true, city: 'Austin' }, 403, false);
@@ -60,6 +66,13 @@ test('MySQL-backed community workflows and access controls', { skip: process.env
     await admin('/register', 'POST', { name: 'Admin', email: 'admin@example.com', password: 'a-long-password-123', agree: true }, 403);
     await admin('/register', 'POST', { name: 'Admin', email: 'admin@example.com', password: 'a-long-password-123', agree: true, setup_code: code }, 201);
     assert.equal((await admin('/session')).user.admin, true);
+    assert.equal(userA.membership_status, 'pending');
+    for (const path of ['/posts','/members','/members/' + userB.id,'/groups','/events','/listings','/messages','/notifications','/unread','/uploads','/invitations','/admin','/admin/membership-applications','/media/0123456789abcdef0123456789abcdef.webp']) await a(path,'GET',undefined,403);
+    await a('/posts','POST',{ body:'Unauthorized post' },403);
+    await a('/uploads','POST',{},403);
+    await a('/invitations','POST',{},403);
+    await approveMember(a,userA.id); await approveMember(b,userB.id);
+
     await b('/admin', 'GET', undefined, 403);
     await a('/profile', 'PATCH', { name: 'Mom A', city: 'Austin', bio: 'Hello village', avatar: '' });
     const profile = await b(`/members/${userA.id}`); assert.equal(profile.bio, 'Hello village'); assert.equal(profile.email, undefined);
@@ -92,6 +105,7 @@ test('MySQL-backed community workflows and access controls', { skip: process.env
     const c = client(); await c('/session');
     await c('/register', 'POST', { name: 'Mom C', email: 'c@example.com', password: 'a-long-password-123', agree: true, is_admin: true, staff_badge: true, developer_badge: true }, 201);
     const userC = (await c('/session')).user; assert.equal(userC.admin, false); assert.equal(userC.staff_badge, false); assert.equal(userC.developer_badge, false);
+    await approveMember(c,userC.id);
     assert.ok((await a('/members?q=Austin')).some(u => u.id === userA.id) === false);
     await a(`/messages/${userB.id}`, 'POST', { body: 'Before friendship' }, 403);
     await a(`/friends/${userA.id}`, 'POST', {}, 400);
@@ -284,6 +298,90 @@ test('MySQL-backed community workflows and access controls', { skip: process.env
     const olderPage = await a(`/posts/${previewPost.id}/comments?before=${latestPage[0].id}`);
     assert.equal(olderPage.length, 5); assert.equal(olderPage[0].body, 'Page comment 0');
     assert.equal((await a(`/posts?post=${previewPost.id}`))[0].latest_comment.body, 'Page comment 104');
+
+    // Existing non-admin accounts are gated on rollout and cannot be silently approved.
+    assert.equal((await retired('/session')).user.membership_status, 'pending');
+    await retired('/posts','GET',undefined,403);
+    let retiredApp = await retired('/membership');
+    await admin('/admin/membership-applications/' + retiredApp.application.user_id,'PATCH',{action:'approve',revision:retiredApp.application.revision,message:''},400);
+    // Review workflow: no self-approval, stale decisions rejected, feedback and resubmission supported.
+    const applicant = client(); await applicant('/session');
+    await applicant('/register','POST',{name:'New applicant',email:'applicant@example.com',password:'a-long-password-123',agree:true,eligibility_confirmed:false},400);
+    await applicant('/register','POST',{name:'New applicant',email:'applicant@example.com',password:'a-long-password-123',agree:true,membership_status:'approved',is_admin:true},201);
+    const applicantUser = (await applicant('/session')).user;
+    assert.equal(applicantUser.membership_status,'pending'); assert.equal(applicantUser.admin,false);
+    const applicantId = applicantUser.id;
+    await a('/members/' + applicantId,'GET',undefined,404);
+    await admin('/admin/users/' + applicantId + '/role','PATCH',{is_admin:true},400);
+    await applicant('/admin/membership-applications/' + applicantId,'PATCH',{action:'approve',revision:1,message:''},403);
+    let ownApplication = await applicant('/membership'), oldRevision = ownApplication.application.revision;
+    await applicant('/membership/application','PUT',{eligibility_confirmed:true,application_reason:'Updated application answers',status:'approved'});
+    await admin('/admin/membership-applications/' + applicantId,'PATCH',{action:'approve',revision:oldRevision,message:''},409);
+    ownApplication = await applicant('/membership');
+    assert.equal(ownApplication.status,'pending');
+    await admin('/admin/membership-applications/' + applicantId,'PATCH',{action:'request_changes',revision:ownApplication.application.revision,message:'Please explain what you seek from this community.'});
+    ownApplication = await applicant('/membership'); assert.ok(ownApplication.application.review_message.includes('Please explain'));
+    await applicant('/membership/application','PUT',{eligibility_confirmed:true,application_reason:'I am a mother seeking friendships and peer support.'});
+    ownApplication = await applicant('/membership'); assert.equal(ownApplication.application.review_message,'');
+    await admin('/admin/membership-applications/' + applicantId,'PATCH',{action:'decline',revision:ownApplication.application.revision,message:'Please review the membership policy.'});
+    assert.equal((await applicant('/session')).user.membership_status,'declined');
+    await applicant('/invitations','POST',{},403); await applicant('/posts','GET',undefined,403);
+    const membershipDb = await mysql.createConnection({host:'127.0.0.1',port:3306,user:'root',password:'integration-only-password',database:'momsvillage_test'});
+    try {
+      await (await import('../membership.js')).initializeMembership(membershipDb);
+      assert.equal((await applicant('/membership')).status,'declined','Restart must not overwrite membership decisions');
+      await applicant('/membership/application','PUT',{eligibility_confirmed:true,application_reason:'A revised application as an adult mother.'});
+      await approveMember(applicant,applicantId);
+      assert.equal((await applicant('/session')).user.membership_status,'approved'); await applicant('/posts');
+      await applicant('/membership/application','PUT',{eligibility_confirmed:true,application_reason:'Cannot reset approved membership'},403);
+      await admin('/admin/membership-applications/' + ownerId,'PATCH',{action:'decline',revision:(await admin('/membership')).application.revision,message:'Cannot remove an admin'},400);
+      await admin('/admin/users/' + applicantId,'PATCH',{banned:true});
+      assert.equal((await applicant('/membership')).status,'suspended');
+      await applicant('/membership/application','PUT',{eligibility_confirmed:true,application_reason:'Cannot bypass suspension'},403);
+      await applicant('/uploads','POST',{},403);
+      await admin('/admin/users/' + applicantId,'PATCH',{banned:false});
+      assert.equal((await applicant('/membership')).status,'approved');
+      // Invitations never approve users, and their secrets never appear in list APIs.
+      const referral = await a('/invitations','POST',{},201);
+      assert.match(referral.code,/^[a-f0-9]{48}$/);
+      const personalInvitations = await a('/invitations');
+      assert.ok(personalInvitations.every(i=>!Object.hasOwn(i,'code')&&!Object.hasOwn(i,'code_hash')));
+      const candidates = [client(),client()];
+      await Promise.all(candidates.map(c=>c('/session')));
+      const races = await Promise.allSettled(candidates.map((c,i)=>c('/register','POST',{name:'Invited mom ' + i,email:'invited' + i + '@example.com',password:'a-long-password-123',agree:true,invitation_code:referral.code},201)));
+      assert.equal(races.filter(r=>r.status==='fulfilled').length,1,'An invitation must be redeemable only once');
+      const winner = candidates[races.findIndex(r=>r.status==='fulfilled')], invitedUser=(await winner('/session')).user;
+      assert.equal(invitedUser.membership_status,'pending'); await winner('/posts','GET',undefined,403);
+      const invitedReview = (await admin('/admin/membership-applications?user_id=' + invitedUser.id))[0];
+      assert.equal(invitedReview.inviter_id,userA.id);
+      const [[createdCount]] = await membershipDb.query("SELECT COUNT(*) AS total FROM users WHERE email IN ('invited0@example.com','invited1@example.com')");
+      assert.equal(createdCount.total,1,'Failed redemption must roll back account creation');
+      const revocable = await a('/invitations','POST',{},201);
+      let issued=(await a('/invitations')).find(i=>i.suffix===revocable.code.slice(-6));
+      await b('/invitations/' + issued.id,'DELETE',undefined,403); await a('/invitations/' + issued.id,'DELETE');
+      const invalidInvite = client(); await invalidInvite('/session');
+      await invalidInvite('/register','POST',{name:'Invalid invite',email:'invalidinvite@example.com',password:'a-long-password-123',agree:true,invitation_code:revocable.code},400);
+      const expiring = await a('/invitations','POST',{},201); issued=(await a('/invitations')).find(i=>i.suffix===expiring.code.slice(-6));
+      await membershipDb.execute('UPDATE membership_invitations SET expires_at=DATE_SUB(UTC_TIMESTAMP(),INTERVAL 1 DAY) WHERE id=?',[issued.id]);
+      await invalidInvite('/register','POST',{name:'Expired invite',email:'expiredinvite@example.com',password:'a-long-password-123',agree:true,invitation_code:expiring.code},400);
+      const unavailable = await a('/invitations','POST',{},201);
+      await admin('/admin/users/' + userA.id,'PATCH',{banned:true});
+      await invalidInvite('/register','POST',{name:'Unavailable inviter',email:'unavailable@example.com',password:'a-long-password-123',agree:true,invitation_code:unavailable.code},400);
+      await admin('/admin/users/' + userA.id,'PATCH',{banned:false});
+      issued=(await a('/invitations')).find(i=>i.suffix===unavailable.code.slice(-6)); await admin('/invitations/' + issued.id,'DELETE');
+      for (let i=0;i<5;i++) await a('/invitations','POST',{},201);
+      await a('/invitations','POST',{},429);
+      const allInvites=await admin('/admin/invitations'); assert.ok(allInvites.every(i=>!Object.hasOwn(i,'code')&&!Object.hasOwn(i,'code_hash')));
+      await assert.rejects((await import('../membership.js')).registerMembership({db:membershipDb,body:{eligibility_confirmed:true,application_reason:'Invite-only application'},passwordHash:'unused',email:'inviteonly@example.com',name:'Applicant',requestedAdmin:false,config:{membership:{inviteOnly:true}},fail:(status,message)=>{throw Object.assign(new Error(message),{status});}}),{status:400});
+      // Decisions revoke an existing session's community access on its next request.
+      ownApplication = await applicant('/membership');
+      await admin('/admin/membership-applications/' + applicantId,'PATCH',{action:'decline',revision:ownApplication.application.revision,message:'Membership under review.'});
+      await applicant('/posts','GET',undefined,403);
+      assert.equal((await applicant('/session')).user.membership_status,'declined');
+      await a('/members/' + applicantId,'GET',undefined,404);
+      const [[audit]] = await membershipDb.execute("SELECT COUNT(*) AS total FROM admin_audit WHERE action='membership_approve'");
+      assert.ok(Number(audit.total)>=4);
+    } finally { await membershipDb.end(); }
   } finally {
     clearTimeout(watchdog);
     child.kill('SIGTERM');
