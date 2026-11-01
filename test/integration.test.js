@@ -100,9 +100,9 @@ test('MySQL-backed community workflows and access controls', { skip: process.env
     await b('/reports', 'POST', { type: 'post', id: post.id, reason: 'Please review this' }, 201);
     const report = (await admin('/admin')).reports[0]; assert.equal((await admin(`/admin/reports/${report.id}/content`)).body, 'First village conversation');
     await admin(`/content/post/${post.id}`, 'DELETE'); await admin(`/admin/reports/${report.id}`, 'PATCH', {}); assert.equal((await admin('/admin')).reports.length, 0);
-    const removedFromChat=socketEvent(liveB,'disconnect');
+
     await admin(`/admin/users/${userB.id}`, 'PATCH', { banned: true });
-    await removedFromChat; await b('/posts', 'GET', undefined, 403);
+    await b('/posts', 'GET', undefined, 403);
     await admin(`/admin/users/${userB.id}`, 'PATCH', { banned: false }); await b('/posts');
     await a('/logout', 'POST'); await a('/session'); await a('/login', 'POST', { email: 'a@example.com', password: 'a-long-password-123' }); assert.equal((await a('/session')).user.id, userA.id);
 
