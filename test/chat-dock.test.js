@@ -36,7 +36,7 @@ test('chat dock keeps separate collapsible conversations and drafts across pages
   assert.equal(first.querySelector('.dock-new').hidden,true);assert.equal(first.querySelector('script'),null);assert.equal(draft.value,'Draft for friend two');
   w.document.querySelector('[data-dock-action="open"][data-id="3"]').click();await wait(()=>w.document.querySelector('[data-dock-peer="3"]'));
   assert.equal(w.document.querySelectorAll('.dock-window').length,2);
-  const second=w.document.querySelector('[data-dock-peer="3"]'),f=second.querySelector('form');f.elements.body.value='Hello three';f.dispatchEvent(new w.Event('submit',{bubbles:true,cancelable:true}));
+  const second=w.document.querySelector('[data-dock-peer="3"]'),f=second.querySelector('form');f.elements.body.value='Hello three';const shift=new w.KeyboardEvent('keydown',{key:'Enter',shiftKey:true,bubbles:true,cancelable:true});f.elements.body.dispatchEvent(shift);assert.equal(shift.defaultPrevented,false);assert.equal(calls.some(c=>c[0]==='/api/messages/3'&&c[1]==='POST'),false);f.elements.body.dispatchEvent(new w.KeyboardEvent('keydown',{key:'Enter',isComposing:true,bubbles:true,cancelable:true}));assert.equal(calls.some(c=>c[0]==='/api/messages/3'&&c[1]==='POST'),false);f.elements.body.dispatchEvent(new w.KeyboardEvent('keydown',{key:'Enter',bubbles:true,cancelable:true}));
   await wait(()=>calls.some(c=>c[0]==='/api/messages/3'&&c[1]==='POST'));
   assert.equal(JSON.parse(calls.find(c=>c[0]==='/api/messages/3'&&c[1]==='POST')[2]).body,'Hello three');assert.equal(draft.value,'Draft for friend two');
   first.querySelector('[data-dock-action="close"]').click();assert.equal(w.document.querySelectorAll('.dock-window').length,1);

@@ -2,7 +2,7 @@ let chatSocket=null,chatBusy=false,chatAgain=false,chatTypingTimer,chatLastTypin
 function chatStatus() {
   if(typeof dockConnection==='function')dockConnection();
   const el=document.querySelector('[data-chat-status]');
-  if(el)el.textContent=chatSocket?.connected?'Live chat connected':'Reconnecting… Messages can still be sent; use Refresh to check for replies.';
+  if(el)el.textContent=chatSocket?.connected?'Live chat connected':'Reconnecting. Messages can still be sent; use Refresh to check for replies.';
 }
 function chatConnect() {
   if(typeof dockMount==='function')dockMount();
@@ -17,7 +17,7 @@ function chatConnect() {
     if(typeof dockHint==='function')dockHint('typing',data);
     if(data.peerId!==socialThread?.peer.id||page!=='messages')return;
     const el=document.querySelector('[data-chat-typing]');if(!el)return;
-    el.textContent=data.active?'Typing…':'';
+    el.textContent=data.active?'Typing.':'';
     clearTimeout(chatTypingTimer);chatTypingTimer=setTimeout(()=>{el.textContent='';},3500);
   });
   chatSocket.on('chat:presence',data=>{
@@ -94,3 +94,14 @@ document.addEventListener('change',async event=>{
 window.addEventListener('online',()=>{chatSocket?.connect();void chatSync();});
 window.addEventListener('pagehide',()=>chatSocket?.disconnect());
 document.addEventListener('visibilitychange',()=>{if(!document.hidden){void chatSync();void refreshUnread();}});
+
+// Enter sends chat messages; Shift+Enter keeps normal textarea line breaks.
+document.addEventListener('keydown',event=>{
+ const input=event.target;
+ if(!input.matches?.('form[data-form="message"] textarea,form[data-dock-form] textarea'))return;
+ if(event.key!=='Enter'||event.shiftKey||event.ctrlKey||event.altKey||event.metaKey||event.isComposing||event.keyCode===229)return;
+ event.preventDefault();
+ const form=input.closest('form'),submit=form.querySelector('button[type="submit"]');
+ if(event.repeat||input.disabled||!input.value.trim()||!submit||submit.disabled)return;
+ form.requestSubmit(submit);
+});

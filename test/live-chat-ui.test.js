@@ -27,8 +27,8 @@ test('live replies preserve drafts, escape content, deduplicate, and show epheme
   assert.equal(f.elements.body.value,'Keep my unfinished draft');assert.equal(w.document.querySelector('.conversation img'),null);
   events['chat:message']({peerId:2});await delay(30);assert.equal(w.document.querySelectorAll('[data-message-id="2"]').length,1);
   events['chat:presence']({peerId:2,online:true});assert.equal(w.document.querySelector('[data-chat-presence]').textContent,'Online');
-  events['chat:typing']({peerId:2,active:true});assert.equal(w.document.querySelector('[data-chat-typing]').textContent,'Typing…');
-  f.dispatchEvent(new w.Event('submit',{bubbles:true,cancelable:true}));await wait(()=>nonce);assert.match(nonce,/^[a-f0-9-]{36}$/);await wait(()=>f.elements.body.value==='');
+  events['chat:typing']({peerId:2,active:true});assert.equal(w.document.querySelector('[data-chat-typing]').textContent,'Typing.');
+  f.elements.body.dispatchEvent(new w.KeyboardEvent('keydown',{key:'Enter',shiftKey:true,bubbles:true,cancelable:true}));assert.equal(nonce,undefined);f.elements.body.dispatchEvent(new w.KeyboardEvent('keydown',{key:'Enter',bubbles:true,cancelable:true}));await wait(()=>nonce);assert.match(nonce,/^[a-f0-9-]{36}$/);await wait(()=>f.elements.body.value==='');
   events['chat:access']({allowed:false});assert.equal(f.elements.body.disabled,true);
   assert.equal(w.document.querySelector('[data-chat-presence]').textContent,'');
  }finally{w.close();}
