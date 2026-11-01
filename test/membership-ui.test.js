@@ -33,7 +33,7 @@ test('pending, declined and suspended applicants stay outside community UI until
     }
     if(user.membership_status!=='approved') assert.fail('Applicant tried to load community data: ' + url);
     if(url==='/api/unread') return response({messages:0,notifications:0});
-    if(url==='/api/posts') return response([]);
+    if(url==='/api/posts' || url==='/api/members?q=') return response([]);
     assert.fail('Unexpected URL ' + url);
   });
   const w=ui.w;
@@ -54,8 +54,8 @@ test('pending, declined and suspended applicants stay outside community UI until
     await waitFor(()=>w.document.querySelector('h1')?.textContent.includes('suspended'));
     assert.equal(w.document.querySelector('form[data-form="membership-application"]'),null);
     user.membership_status='approved'; application.status='approved'; w.document.querySelector('[data-action="membership-refresh"]').click();
-    await waitFor(()=>w.document.querySelector('.sidebar'));
-    assert.ok(calls.some(c=>c[0]==='/api/unread')); assert.ok(calls.some(c=>c[0]==='/api/posts'));
+    await waitFor(()=>w.document.querySelector('.sidebar') && calls.some(c=>c[0]==='/api/members?q='));
+    assert.ok(calls.some(c=>c[0]==='/api/unread'));
   } finally { ui.close(); }
 });
 
