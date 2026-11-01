@@ -46,7 +46,7 @@ test('responsive pages, mobile menu, dialogs and chat fit real browser viewports
   await fits('Mobile chat');
   const win=await page.locator('[data-dock-peer="3"]').boundingBox();assert.ok(win.x>=0&&win.x+win.width<=391);
   await page.setViewportSize({width:390,height:500});await fits('Short viewport');
-  await page.evaluate(()=>{location.hash='profile';});await page.locator('[data-child-action="add"]').click();await page.locator('[data-children-form="save"]').waitFor();await fits('Children editor');const childDialog=await page.locator('dialog').boundingBox();assert.ok(childDialog.x>=0&&childDialog.x+childDialog.width<=391);
+  await page.evaluate(()=>{document.querySelectorAll('.dock-window [data-dock-action=close]').forEach(button=>button.click());location.hash='profile';});await page.locator('[data-child-action="add"]').click();await page.locator('[data-children-form="save"]').waitFor();await fits('Children editor');const childDialog=await page.locator('dialog').boundingBox();assert.ok(childDialog.x>=0&&childDialog.x+childDialog.width<=391);
   assert.deepEqual(errors,[]);
  }finally{await browser.close();await new Promise(resolve=>server.close(resolve));}
 });
