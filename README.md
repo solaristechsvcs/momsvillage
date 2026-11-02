@@ -195,3 +195,7 @@ Group owners can edit the group name, city/area, and description from the group 
 Group owners can upload or set an HTTPS picture from Edit group, replace it, or clear the picture URL to remove it. Group pictures appear on Local groups cards and as a cover on the group page. Uploads use the existing image processing, metadata removal, size limits and ownership checks. Images attached to a group cannot be deleted from the image library until removed from that group. Text-only API edits preserve the existing picture.
 
 On startup the app adds community_groups.image if missing, using a migration lock to support existing databases safely. Update files and restart Wisp. No manual SQL or config changes are needed.
+
+### Global groups (0.7.5)
+
+Local groups are now labeled Global groups throughout navigation and group discovery. Groups connect approved members worldwide around shared interests. The location field is optional when creating or editing a group; groups without a location display Worldwide. Existing group locations, pictures, posts, owners, and memberships remain intact. This does not make community content visible to signed-out visitors. No schema or config changes are required.

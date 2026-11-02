@@ -227,7 +227,7 @@ app.post('/api/groups', async (req, res) => {
   const connection = await db.getConnection();
   try {
     await connection.beginTransaction();
-    const [result] = await connection.execute('INSERT INTO community_groups(owner_id,name,city,description) VALUES(?,?,?,?)', [req.user.id, text(req.body.name, 100), text(req.body.city, 120), text(req.body.description, 3000)]);
+    const [result] = await connection.execute('INSERT INTO community_groups(owner_id,name,city,description) VALUES(?,?,?,?)', [req.user.id, text(req.body.name, 100), text(req.body.city ?? '', 120, false), text(req.body.description, 3000)]);
     await connection.execute('INSERT INTO memberships(group_id,user_id) VALUES(?,?)', [result.insertId, req.user.id]);
     await connection.commit(); res.status(201).json({ id: result.insertId });
   } catch (error) { await connection.rollback(); throw error; } finally { connection.release(); }
@@ -235,7 +235,7 @@ app.post('/api/groups', async (req, res) => {
 app.patch('/api/groups/:id',async(req,res)=>{
  const group=await existing('community_groups',req.params.id);
  if(group.owner_id!==req.user.id)fail(403,'Only the group owner can edit this group.');
- const name=text(req.body.name,100),city=text(req.body.city,120),description=text(req.body.description,3000);
+ const name=text(req.body.name,100),city=text(req.body.city ?? '',120,false),description=text(req.body.description,3000);
  await social.withImage(req.user.id,req.body.image ?? group.image,async(execute,url)=>{
   const [current]=await execute('SELECT owner_id FROM community_groups WHERE id=? FOR UPDATE',[group.id]);
   if(!current)fail(404,'Group not found.');

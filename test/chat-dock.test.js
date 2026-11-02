@@ -27,7 +27,7 @@ test('chat dock keeps separate collapsible conversations and drafts across pages
   assert.ok(w.document.querySelector('[data-dock-online="2"]').textContent.includes('Online'));
   w.document.querySelector('[data-dock-action="open"][data-id="2"]').click();await wait(()=>w.document.querySelector('[data-dock-peer="2"] textarea'));
   const first=w.document.querySelector('[data-dock-peer="2"]'),draft=first.querySelector('textarea');draft.value='Draft for friend two';
-  w.location.hash='groups';await wait(()=>w.document.querySelector('#main h1')?.textContent.includes('local'));
+  w.location.hash='groups';await wait(()=>w.document.querySelector('#main h1')?.textContent.includes('Global groups'));
   assert.equal(w.document.querySelector('[data-dock-peer="2"] textarea'),draft);assert.equal(draft.value,'Draft for friend two');
   first.querySelector('[data-dock-action="minimize"]').click();assert.ok(first.classList.contains('minimized'));
   const count=calls.filter(c=>c[0].startsWith('/api/messages/2')).length;incoming=true;events['chat:message']({peerId:2});await wait(()=>!first.querySelector('.dock-new').hidden);

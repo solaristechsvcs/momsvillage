@@ -129,6 +129,11 @@ test('MySQL-backed community workflows and access controls', { skip: process.env
     const comment = (await a(`/posts/${post.id}/comments`))[0]; assert.equal(comment.body, 'Welcome!');
     await a(`/content/comment/${comment.id}`, 'DELETE', undefined, 403);
     const group = await a('/groups', 'POST', { name: 'Austin Moms', city: 'Austin', description: 'Local friends' }, 201);
+    const worldwideGroup=await a('/groups','POST',{name:'Worldwide moms',description:'Moms around the world'},201);
+    assert.equal((await b('/groups')).find(g=>g.id===worldwideGroup.id).city,'');
+    await a('/groups/'+worldwideGroup.id,'PATCH',{name:'Worldwide moms updated',description:'Everyone welcome'});
+    assert.equal((await b('/groups')).find(g=>g.id===worldwideGroup.id).city,'');
+    await a('/content/group/'+worldwideGroup.id,'DELETE');
     await b('/posts', 'POST', { group_id: group.id, body: 'Hi', image: '' }, 403);
     await b(`/groups/${group.id}/join`, 'POST', { active: true });
     await b('/groups/'+group.id,'PATCH',{name:'Unauthorized',city:'Austin',description:'No'},403);
