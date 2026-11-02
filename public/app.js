@@ -305,7 +305,7 @@ async function administrationPage(route) {
 
 function groupType(g){return g.visibility==='closed'?'Closed':'Open';}
 function groupPrivacyField(value='open'){
- return `<label for="group-visibility">Group access</label><select id="group-visibility" name="visibility"><option value="open" ${value!=='closed'?'selected':''}>Open — join immediately</option><option value="closed" ${value==='closed'?'selected':''}>Closed — owner approves requests; members-only posts</option></select>`;
+ return `<label for="group-visibility">Group access</label><select id="group-visibility" name="visibility"><option value="open" ${value!=='closed'?'selected':''}>Open — join immediately</option><option value="closed" ${value==='closed'?'selected':''}>Closed — owner approves requests; members-only posts</option></select><p class="hint">Open group posts are visible to all approved members. Closed group posts are visible only to group members. Changing access also affects existing posts; current members stay in the group.</p>`;
 }
 function groupJoinButton(g){
  const pending=g.visibility==='closed'&&g.join_requested&&!g.joined;

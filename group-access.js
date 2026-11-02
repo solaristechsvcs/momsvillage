@@ -67,8 +67,8 @@ export function groupAccessRouter({db,query}){
 
 export async function canReadGroupImage(query,url,userId,isAdmin){
  const [access]=await query(`SELECT EXISTS(SELECT 1 FROM posts p JOIN community_groups g ON g.id=p.group_id WHERE p.image=? AND g.visibility='closed') AS private_used,
- (EXISTS(SELECT 1 FROM users WHERE avatar=?) OR EXISTS(SELECT 1 FROM listings WHERE image=?) OR EXISTS(SELECT 1 FROM community_groups WHERE image=?) OR EXISTS(SELECT 1 FROM posts p WHERE p.image=? AND ${postAccessSql('p')})) AS accessible,
+ (EXISTS(SELECT 1 FROM users WHERE avatar=?) OR EXISTS(SELECT 1 FROM listings WHERE image=?) OR EXISTS(SELECT 1 FROM community_groups WHERE image=?) OR EXISTS(SELECT 1 FROM posts p WHERE p.image=? AND ${postAccessSql('p')})) AS can_read_flag,
  EXISTS(SELECT 1 FROM reports r JOIN posts p ON p.id=r.target_id WHERE r.target_type='post' AND p.image=?) AS reported`,[url,url,url,url,url,userId,url]);
- return !access.private_used||!!access.accessible||(isAdmin&&!!access.reported);
+ return !access.private_used||!!access.can_read_flag||(isAdmin&&!!access.reported);
 }
 
