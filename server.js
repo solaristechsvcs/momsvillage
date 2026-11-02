@@ -187,6 +187,18 @@ async function existing(table, value) {
   const [row] = await query(`SELECT * FROM ${table} WHERE id=?`, [id(value)]);
   if (!row) fail(404, 'Content not found.'); return row;
 }
+app.patch('/api/posts/:id',async(req,res)=>{
+ const post=await existing('posts',req.params.id);
+ if(post.user_id!==req.user.id)fail(403,'Only the post creator can edit this post.');
+ const body=text(req.body.body,5000);
+ await social.withImage(req.user.id,req.body.image ?? post.image,async(execute,url)=>{
+  const [current]=await execute('SELECT user_id FROM posts WHERE id=? FOR UPDATE',[post.id]);
+  if(!current)fail(404,'Post not found.');
+  if(current.user_id!==req.user.id)fail(403,'Only the post creator can edit this post.');
+  await execute('UPDATE posts SET body=?,image=? WHERE id=? AND user_id=?',[body,url,post.id,req.user.id]);
+ });
+ res.json({ok:true});
+});
 app.post('/api/posts/:id/like', async (req, res) => {
   const post = await existing('posts', req.params.id);
   if (req.body.active === true) {
@@ -217,6 +229,12 @@ app.post('/api/groups', async (req, res) => {
     await connection.execute('INSERT INTO memberships(group_id,user_id) VALUES(?,?)', [result.insertId, req.user.id]);
     await connection.commit(); res.status(201).json({ id: result.insertId });
   } catch (error) { await connection.rollback(); throw error; } finally { connection.release(); }
+});
+app.patch('/api/groups/:id',async(req,res)=>{
+ const group=await existing('community_groups',req.params.id);
+ if(group.owner_id!==req.user.id)fail(403,'Only the group owner can edit this group.');
+ await query('UPDATE community_groups SET name=?,city=?,description=? WHERE id=? AND owner_id=?',[text(req.body.name,100),text(req.body.city,120),text(req.body.description,3000),group.id,req.user.id]);
+ res.json({ok:true});
 });
 app.post('/api/groups/:id/join', async (req, res) => {
   const group = await existing('community_groups', req.params.id);

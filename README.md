@@ -185,3 +185,7 @@ Administration / Announcements lets approved administrators save a draft, publis
 The banner appears on community pages, sign-in/application screens, password-change screens, and the verification camera page. It is public, so do not include private member information. Open visible pages check every 30 seconds and when returning to a tab. Visitors may dismiss the current revision for that browser tab/session; a new revision appears again. Messages are plain text and are escaped. On a network interruption, the last loaded banner remains until the next successful refresh.
 
 Update files and restart Wisp; site_announcement is created automatically. No config changes are needed.
+
+### Group and post editing (0.7.3)
+
+Group owners can edit the group name, city/area, and description from the group page or Local groups cards. Post authors can edit their own text and photo from Edit post on group posts and the main feed. Editing preserves the group, author, likes, comments, and original post identifier. Ownership fields in edit requests are ignored. Neither group owners nor administrators can rewrite another author's posts; existing moderation deletion remains available separately. Uploaded replacement photos must belong to the author. Approved membership is required. No schema or config changes are needed.
