@@ -247,8 +247,8 @@ export async function socialRouter({ db, query, config, fail, onMessage=()=>{} }
       const [record] = await execute('SELECT filename FROM uploads WHERE filename=? AND user_id=? FOR UPDATE', [filename, req.user.id]);
       if (!record) fail(404, 'Image not found.');
       const url = `/api/media/${filename}`;
-      const [used] = await execute('SELECT (SELECT COUNT(*) FROM users WHERE avatar=?)+(SELECT COUNT(*) FROM posts WHERE image=?)+(SELECT COUNT(*) FROM listings WHERE image=?) AS total', [url, url, url]);
-      if (Number(used.total)) fail(409, 'This image is in use. Remove it from the profile, post, or listing first.');
+      const [used] = await execute('SELECT (SELECT COUNT(*) FROM users WHERE avatar=?)+(SELECT COUNT(*) FROM posts WHERE image=?)+(SELECT COUNT(*) FROM listings WHERE image=?)+(SELECT COUNT(*) FROM community_groups WHERE image=?) AS total', [url, url, url, url]);
+      if (Number(used.total)) fail(409, 'This image is in use. Remove it from the profile, post, listing, or group first.');
       await execute('DELETE FROM uploads WHERE filename=? AND user_id=?', [filename, req.user.id]);
     });
     await unlink(resolve(uploadPath, filename)).catch(error => { if (error.code !== 'ENOENT') throw error; }); res.json({ ok: true });

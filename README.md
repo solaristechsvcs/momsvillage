@@ -189,3 +189,9 @@ Update files and restart Wisp; site_announcement is created automatically. No co
 ### Group and post editing (0.7.3)
 
 Group owners can edit the group name, city/area, and description from the group page or Local groups cards. Post authors can edit their own text and photo from Edit post on group posts and the main feed. Editing preserves the group, author, likes, comments, and original post identifier. Ownership fields in edit requests are ignored. Neither group owners nor administrators can rewrite another author's posts; existing moderation deletion remains available separately. Uploaded replacement photos must belong to the author. Approved membership is required. No schema or config changes are needed.
+
+### Group pictures (0.7.4)
+
+Group owners can upload or set an HTTPS picture from Edit group, replace it, or clear the picture URL to remove it. Group pictures appear on Local groups cards and as a cover on the group page. Uploads use the existing image processing, metadata removal, size limits and ownership checks. Images attached to a group cannot be deleted from the image library until removed from that group. Text-only API edits preserve the existing picture.
+
+On startup the app adds community_groups.image if missing, using a migration lock to support existing databases safely. Update files and restart Wisp. No manual SQL or config changes are needed.

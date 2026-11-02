@@ -14,6 +14,7 @@ import { text, id, price } from './validation.js';
 import { authColumns, updatePassword, sameAuthVersion } from './passwords.js';
 import {announcementsRouter} from './announcements.js';
 import {childrenRouter,sharedChildren} from './children.js';
+import {initializeGroupPictures} from './group-pictures.js';
 import { socialRouter } from './social.js';
 import { verificationSettings } from './verification-utils.js';
 import { VerificationService } from './verification-service.js';
@@ -40,6 +41,7 @@ const childrenSchema=await readFile(new URL('./children-schema.sql',import.meta.
 for(const statement of childrenSchema.split(';').map(s=>s.trim()).filter(Boolean))await db.query(statement);
 const announcementSchema=await readFile(new URL('./announcement-schema.sql',import.meta.url),'utf8');
 for(const statement of announcementSchema.split(';').map(s=>s.trim()).filter(Boolean))await db.query(statement);
+await initializeGroupPictures(db,config.mysql.database);
 await initializeBadgeStorage(db, config.mysql.database);
 await initializeAdminRoles(db, config);
 await initializeMembership(db);
@@ -233,7 +235,13 @@ app.post('/api/groups', async (req, res) => {
 app.patch('/api/groups/:id',async(req,res)=>{
  const group=await existing('community_groups',req.params.id);
  if(group.owner_id!==req.user.id)fail(403,'Only the group owner can edit this group.');
- await query('UPDATE community_groups SET name=?,city=?,description=? WHERE id=? AND owner_id=?',[text(req.body.name,100),text(req.body.city,120),text(req.body.description,3000),group.id,req.user.id]);
+ const name=text(req.body.name,100),city=text(req.body.city,120),description=text(req.body.description,3000);
+ await social.withImage(req.user.id,req.body.image ?? group.image,async(execute,url)=>{
+  const [current]=await execute('SELECT owner_id FROM community_groups WHERE id=? FOR UPDATE',[group.id]);
+  if(!current)fail(404,'Group not found.');
+  if(current.owner_id!==req.user.id)fail(403,'Only the group owner can edit this group.');
+  await execute('UPDATE community_groups SET name=?,city=?,description=?,image=? WHERE id=? AND owner_id=?',[name,city,description,url,group.id,req.user.id]);
+ });
  res.json({ok:true});
 });
 app.post('/api/groups/:id/join', async (req, res) => {

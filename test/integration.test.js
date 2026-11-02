@@ -17,6 +17,7 @@ test('MySQL-backed community workflows and access controls', { skip: process.env
   try {
     const oldSchema = await (await import('node:fs/promises')).readFile(new URL('../schema.sql', import.meta.url), 'utf8');
     for (const statement of oldSchema.split(';').map(s => s.trim()).filter(Boolean)) await seed.query(statement);
+    await seed.query('ALTER TABLE community_groups DROP COLUMN image'); // Exercise upgrade from an existing group table.
     const bcrypt = (await import('bcryptjs')).default;
     await seed.execute('INSERT INTO users(name,email,password,is_admin,bio) VALUES(?,?,?,?,?)', ['Retired admin', 'retired@example.com', await bcrypt.hash('legacy-password-123', 4), true, 'Legacy account']);
     await seed.query("CREATE TABLE user_badges(user_id INT UNSIGNED NOT NULL,badge ENUM('developer') NOT NULL,PRIMARY KEY(user_id,badge),FOREIGN KEY(user_id) REFERENCES users(id))");
@@ -268,11 +269,21 @@ test('MySQL-backed community workflows and access controls', { skip: process.env
     await guest(mediaPath, 'GET', undefined, 401);
     await a('/profile', 'PATCH', { name: 'Mom A', city: 'Austin', bio: 'Photo test', avatar: uploaded.url });
     const filename = uploaded.url.split('/').pop();
+    const groupPictureBody={name:updatedGroup.name,city:updatedGroup.city,description:updatedGroup.description,image:uploaded.url};
+    await b('/groups/'+group.id,'PATCH',groupPictureBody,403);
+    await a('/groups/'+group.id,'PATCH',{...groupPictureBody,image:'javascript:alert(1)'},400);
+    await a('/groups/'+group.id,'PATCH',groupPictureBody);
+    assert.equal((await b('/groups')).find(g=>g.id===group.id).image,uploaded.url);
+    await a('/groups/'+group.id,'PATCH',{name:updatedGroup.name,city:updatedGroup.city,description:updatedGroup.description});
+    assert.equal((await b('/groups')).find(g=>g.id===group.id).image,uploaded.url,'Text-only edits keep the existing picture');
     await b('/posts/'+groupPost.id,'PATCH',{body:'Cannot attach another member image',image:uploaded.url},400);
     await b(`/uploads/${filename}`, 'DELETE', undefined, 404);
     await b('/posts', 'POST', { body: 'Stolen upload reference', image: uploaded.url }, 400);
     await a(`/uploads/${filename}`, 'DELETE', undefined, 409);
     await a('/profile', 'PATCH', { name: 'Mom A', city: 'Austin', bio: 'Photo removed', avatar: '' });
+    await a('/uploads/'+filename,'DELETE',undefined,409);
+    await a('/groups/'+group.id,'PATCH',{...groupPictureBody,image:''});
+    assert.equal((await b('/groups')).find(g=>g.id===group.id).image,'');
     await a(`/uploads/${filename}`, 'DELETE'); await a(mediaPath, 'GET', undefined, 404);
     assert.equal((await a('/uploads')).length, 0);
     const removedFromChat=socketEvent(liveB,'disconnect');
