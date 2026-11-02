@@ -1,3 +1,4 @@
+import {canReadGroupImage} from './group-access.js';
 import { Router } from 'express';
 import { rateLimit } from 'express-rate-limit';
 import multer from 'multer';
@@ -235,8 +236,9 @@ export async function socialRouter({ db, query, config, fail, onMessage=()=>{} }
   router.get('/media/:filename', async (req, res) => {
     const filename = req.params.filename;
     if (!/^[a-f0-9]{32}\.webp$/.test(filename)) fail(404, 'Image not found.');
-    const [record] = await query('SELECT u.banned,a.status AS membership_status FROM uploads f JOIN users u ON u.id=f.user_id LEFT JOIN membership_applications a ON a.user_id=u.id WHERE f.filename=?', [filename]);
+    const [record] = await query('SELECT u.id AS owner_id,u.banned,a.status AS membership_status FROM uploads f JOIN users u ON u.id=f.user_id LEFT JOIN membership_applications a ON a.user_id=u.id WHERE f.filename=?', [filename]);
     if (!record || ((record.banned || record.membership_status !== 'approved') && !req.isAdmin)) fail(404, 'Image not found.');
+    if(record.owner_id!==req.user.id&&!await canReadGroupImage(query,'/api/media/'+filename,req.user.id,req.isAdmin))fail(403,'Join this closed group to view its images.');
     res.type('image/webp').set('Content-Disposition', 'inline').sendFile(resolve(uploadPath, filename));
   });
   router.get('/uploads', async (req, res) => res.json(await query('SELECT filename,bytes,created_at FROM uploads WHERE user_id=? ORDER BY created_at DESC LIMIT 200', [req.user.id])));

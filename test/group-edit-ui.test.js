@@ -10,6 +10,7 @@ test('owners edit groups and authors edit their own posts with existing values',
  w.fetch=async(url,opts={})=>{let data;
  if(url==='/api/session')data={user:{id:1,name:'Self',admin:true,membership_status:'approved'},csrf:'test'};
  else if(url==='/api/unread')data={messages:0,notifications:0};
+ else if(url==='/api/groups/5/requests')data=[];
  else if(url==='/api/groups')data=[group];
  else if(url==='/api/posts?group=5')data=posts;
  else if(url==='/api/groups/5'&&opts.method==='PATCH'){Object.assign(group,JSON.parse(opts.body));groupSaved=true;data={ok:true};}
@@ -22,8 +23,8 @@ test('owners edit groups and authors edit their own posts with existing values',
  await wait(()=>w.document.querySelector('[data-action="edit-group"]'));
  assert.equal(w.document.querySelector('[data-action="edit-post"][data-id="9"]'),null);
  w.document.querySelector('[data-action="edit-group"]').click();let f=w.document.querySelector('form[data-form="edit-group"]');assert.equal(f.elements.name.value,'Our group');assert.equal(f.elements.description.value,'Group details');
- assert.equal(f.elements.image.value,'https://example.com/group.jpg');assert.ok(f.querySelector('[data-upload-field="image"]'));f.elements.image.value='https://example.com/new-group.jpg';f.elements.name.value='Our updated group';f.dispatchEvent(new w.Event('submit',{bubbles:true,cancelable:true}));await wait(()=>groupSaved&&w.document.querySelector('#main h1')?.textContent==='Our updated group');
- assert.equal(w.document.querySelector('.group-cover').getAttribute('src'),'https://example.com/new-group.jpg');
+ assert.equal(f.elements.visibility.value,'open');f.elements.visibility.value='closed';assert.equal(f.elements.image.value,'https://example.com/group.jpg');assert.ok(f.querySelector('[data-upload-field="image"]'));f.elements.image.value='https://example.com/new-group.jpg';f.elements.name.value='Our updated group';f.dispatchEvent(new w.Event('submit',{bubbles:true,cancelable:true}));await wait(()=>groupSaved&&w.document.querySelector('#main h1')?.textContent==='Our updated group');
+ assert.equal(group.visibility,'closed');assert.equal(w.document.querySelector('.group-cover').getAttribute('src'),'https://example.com/new-group.jpg');
  w.document.querySelector('[data-action="edit-post"][data-id="8"]').click();f=w.document.querySelector('form[data-form="edit-post"]');assert.equal(f.elements.body.value,'Original post');assert.equal(f.elements.image.value,'https://example.com/photo.jpg');
  f.elements.body.value='Updated post';f.dispatchEvent(new w.Event('submit',{bubbles:true,cancelable:true}));await wait(()=>postSaved&&w.document.querySelector('.post-body')?.textContent==='Updated post');
  assert.equal(posts[0].group_id,5);assert.equal(posts[0].like_count,2);assert.equal(posts[0].comment_count,1);

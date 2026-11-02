@@ -199,3 +199,11 @@ On startup the app adds community_groups.image if missing, using a migration loc
 ### Global groups (0.7.5)
 
 Local groups are now labeled Global groups throughout navigation and group discovery. Groups connect approved members worldwide around shared interests. The location field is optional when creating or editing a group; groups without a location display Worldwide. Existing group locations, pictures, posts, owners, and memberships remain intact. This does not make community content visible to signed-out visitors. No schema or config changes are required.
+
+### Open and Closed groups (0.8.0)
+
+Owners choose Open or Closed when creating or editing a group. Open groups let approved members join immediately. Closed groups accept join requests; only the owner can approve or decline them from the group's Join requests section. A pending request never grants membership or post access. Members can cancel a request or leave; the owner must retain membership. Existing members stay when an owner changes the setting. If a group is reopened, pending applicants can click Join group for immediate membership or the owner can resolve their request.
+
+All existing groups default to Open. Closed groups remain discoverable by approved members, with their name, picture, description, and member count visible. Posts and comments require group membership, including direct post links, likes, comments and reporting. Uploaded post pictures used only in closed groups are protected too; the uploader keeps access to their own image library. Images also used in public profiles, listings, group covers, or accessible posts remain accessible through those uses. Images on external hosts follow those hosts' access rules. Administrators can review reported posts and their uploaded images through the existing moderation workflow.
+
+Startup automatically adds community_groups.visibility and creates group_join_requests. No manual SQL or configuration change is required. Tests exercise existing-schema upgrades, approval/rejection/cancellation, authorization, direct links and images, privacy changes, and retaining existing membership.

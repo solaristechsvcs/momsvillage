@@ -14,6 +14,7 @@ import { text, id, price } from './validation.js';
 import { authColumns, updatePassword, sameAuthVersion } from './passwords.js';
 import {announcementsRouter} from './announcements.js';
 import {childrenRouter,sharedChildren} from './children.js';
+import {initializeGroupAccess,groupAccessRouter,groupVisibility,requireGroupRead,postAccessSql} from './group-access.js';
 import {initializeGroupPictures} from './group-pictures.js';
 import { socialRouter } from './social.js';
 import { verificationSettings } from './verification-utils.js';
@@ -42,6 +43,7 @@ for(const statement of childrenSchema.split(';').map(s=>s.trim()).filter(Boolean
 const announcementSchema=await readFile(new URL('./announcement-schema.sql',import.meta.url),'utf8');
 for(const statement of announcementSchema.split(';').map(s=>s.trim()).filter(Boolean))await db.query(statement);
 await initializeGroupPictures(db,config.mysql.database);
+await initializeGroupAccess(db,config.mysql.database);
 await initializeBadgeStorage(db, config.mysql.database);
 await initializeAdminRoles(db, config);
 await initializeMembership(db);
@@ -145,6 +147,7 @@ app.post('/api/admin/users/:id/password',requireApproved,requireAdmin,passwordLi
 app.use('/api', verificationRouter({ service:verificationService,requireApproved,requireAdmin }));
 app.use('/api', membershipRouter({ db, query, config, fail, requireApproved, requireAdmin }));
 app.use('/api', requireApproved);
+app.use('/api',groupAccessRouter({db,query}));
 app.use('/api',childrenRouter({db,query}));
 app.use('/api',announcementsRouter({db,query,requireAdmin}));
 app.get('/api/chat/online',async(req,res)=>res.json({user_ids:await chat.online(req.user.id)}));
@@ -161,12 +164,13 @@ app.get('/api/members/:id', async (req, res) => {
 app.get('/api/posts', async (req, res) => {
   const groupId = req.query.group ? id(req.query.group) : null;
   const postId = req.query.post ? id(req.query.post) : null;
+  if(groupId)await requireGroupRead(query,groupId,req.user.id);
   const posts = await query(`SELECT p.*,u.name,u.avatar,${badgeColumns()},
     (SELECT COUNT(*) FROM likes WHERE post_id=p.id) AS like_count,
     EXISTS(SELECT 1 FROM likes WHERE post_id=p.id AND user_id=?) AS liked,
     (SELECT COUNT(*) FROM comments cc JOIN users cu ON cu.id=cc.user_id WHERE cc.post_id=p.id AND cu.banned=FALSE AND ${approvedMemberSql('cu')}) AS comment_count,
     g.name AS group_name FROM posts p JOIN users u ON u.id=p.user_id LEFT JOIN community_groups g ON g.id=p.group_id
-    WHERE u.banned=FALSE AND ${approvedMemberSql('u')} ${postId ? 'AND p.id=?' : groupId ? 'AND p.group_id=?' : 'AND p.group_id IS NULL'} ORDER BY p.id DESC LIMIT 50`, postId ? [req.user.id, postId] : groupId ? [req.user.id, groupId] : [req.user.id]);
+    WHERE u.banned=FALSE AND ${approvedMemberSql('u')} AND ${postAccessSql('p')} ${postId ? 'AND p.id=?' : groupId ? 'AND p.group_id=?' : 'AND p.group_id IS NULL'} ORDER BY p.id DESC LIMIT 50`, postId ? [req.user.id,req.user.id,postId] : groupId ? [req.user.id,req.user.id,groupId] : [req.user.id,req.user.id]);
   if (posts.length) {
     const postIds = posts.map(post => post.id), placeholders = postIds.map(() => '?').join(',');
     const latest = await query(`SELECT c.*,cu.name,cu.avatar,${badgeColumns('cu')} FROM comments c
@@ -203,6 +207,7 @@ app.patch('/api/posts/:id',async(req,res)=>{
 });
 app.post('/api/posts/:id/like', async (req, res) => {
   const post = await existing('posts', req.params.id);
+  await requireGroupRead(query,post.group_id,req.user.id);
   if (req.body.active === true) {
     const result = await query('INSERT IGNORE INTO likes(post_id,user_id) VALUES(?,?)', [post.id, req.user.id]);
     if (result.affectedRows) await social.notify(post.user_id, req.user.id, 'like', post.id);
@@ -211,23 +216,25 @@ app.post('/api/posts/:id/like', async (req, res) => {
   res.json({ ok: true });
 });
 app.get('/api/posts/:id/comments', async (req, res) => {
-  await existing('posts', req.params.id);
+  const targetPost=await existing('posts',req.params.id);
+  await requireGroupRead(query,targetPost.group_id,req.user.id);
   const before = req.query.before ? id(req.query.before) : null;
   const comments = await query(`SELECT c.*,u.name,u.avatar,${badgeColumns()} FROM comments c JOIN users u ON u.id=c.user_id WHERE c.post_id=? AND u.banned=FALSE AND ${approvedMemberSql('u')} ${before ? 'AND c.id<?' : ''} ORDER BY c.id DESC LIMIT 100`, [id(req.params.id), ...(before ? [before] : [])]);
   res.json(comments.reverse());
 });
 app.post('/api/posts/:id/comments', async (req, res) => {
   const post = await existing('posts', req.params.id);
+  await requireGroupRead(query,post.group_id,req.user.id);
   await query('INSERT INTO comments(post_id,user_id,body) VALUES(?,?,?)', [post.id, req.user.id, text(req.body.body, 2000)]);
   await social.notify(post.user_id, req.user.id, 'comment', post.id); res.status(201).json({ ok: true });
 });
 app.get('/api/groups', async (req, res) => res.json(await query(`SELECT g.*,u.name AS owner_name,(SELECT COUNT(*) FROM memberships WHERE group_id=g.id) AS members,
-  EXISTS(SELECT 1 FROM memberships WHERE group_id=g.id AND user_id=?) AS joined FROM community_groups g JOIN users u ON u.id=g.owner_id WHERE u.banned=FALSE AND ${approvedMemberSql('u')} ORDER BY g.id DESC LIMIT 100`, [req.user.id])));
+  EXISTS(SELECT 1 FROM memberships WHERE group_id=g.id AND user_id=?) AS joined,EXISTS(SELECT 1 FROM group_join_requests r WHERE r.group_id=g.id AND r.user_id=?) AS join_requested FROM community_groups g JOIN users u ON u.id=g.owner_id WHERE u.banned=FALSE AND ${approvedMemberSql('u')} ORDER BY g.id DESC LIMIT 100`, [req.user.id,req.user.id])));
 app.post('/api/groups', async (req, res) => {
   const connection = await db.getConnection();
   try {
     await connection.beginTransaction();
-    const [result] = await connection.execute('INSERT INTO community_groups(owner_id,name,city,description) VALUES(?,?,?,?)', [req.user.id, text(req.body.name, 100), text(req.body.city ?? '', 120, false), text(req.body.description, 3000)]);
+    const [result] = await connection.execute('INSERT INTO community_groups(owner_id,name,city,description,visibility) VALUES(?,?,?,?,?)', [req.user.id, text(req.body.name, 100), text(req.body.city ?? '', 120, false), text(req.body.description, 3000),groupVisibility(req.body.visibility??'open')]);
     await connection.execute('INSERT INTO memberships(group_id,user_id) VALUES(?,?)', [result.insertId, req.user.id]);
     await connection.commit(); res.status(201).json({ id: result.insertId });
   } catch (error) { await connection.rollback(); throw error; } finally { connection.release(); }
@@ -237,18 +244,12 @@ app.patch('/api/groups/:id',async(req,res)=>{
  if(group.owner_id!==req.user.id)fail(403,'Only the group owner can edit this group.');
  const name=text(req.body.name,100),city=text(req.body.city ?? '',120,false),description=text(req.body.description,3000);
  await social.withImage(req.user.id,req.body.image ?? group.image,async(execute,url)=>{
-  const [current]=await execute('SELECT owner_id FROM community_groups WHERE id=? FOR UPDATE',[group.id]);
+  const [current]=await execute('SELECT owner_id,visibility FROM community_groups WHERE id=? FOR UPDATE',[group.id]);
   if(!current)fail(404,'Group not found.');
   if(current.owner_id!==req.user.id)fail(403,'Only the group owner can edit this group.');
-  await execute('UPDATE community_groups SET name=?,city=?,description=?,image=? WHERE id=? AND owner_id=?',[name,city,description,url,group.id,req.user.id]);
+  await execute('UPDATE community_groups SET name=?,city=?,description=?,image=?,visibility=? WHERE id=? AND owner_id=?',[name,city,description,url,groupVisibility(req.body.visibility??current.visibility),group.id,req.user.id]);
  });
  res.json({ok:true});
-});
-app.post('/api/groups/:id/join', async (req, res) => {
-  const group = await existing('community_groups', req.params.id);
-  if (req.body.active === true) await query('INSERT IGNORE INTO memberships(group_id,user_id) VALUES(?,?)', [group.id, req.user.id]);
-  else { if (group.owner_id === req.user.id) fail(400, 'Group owners must keep their membership.'); await query('DELETE FROM memberships WHERE group_id=? AND user_id=?', [group.id, req.user.id]); }
-  res.json({ ok: true });
 });
 app.get('/api/events', async (req, res) => res.json(await query(`SELECT e.*,u.name,${badgeColumns()},(SELECT COUNT(*) FROM rsvps WHERE event_id=e.id) AS attendees,
   EXISTS(SELECT 1 FROM rsvps WHERE event_id=e.id AND user_id=?) AS going FROM events e JOIN users u ON u.id=e.user_id WHERE u.banned=FALSE AND ${approvedMemberSql('u')} AND e.starts_at>=UTC_TIMESTAMP() ORDER BY e.starts_at LIMIT 100`, [req.user.id])));
@@ -293,7 +294,9 @@ app.post('/api/reports', async (req, res) => {
     await social.reportMessage(req, res); return;
   }
   const target = targets[req.body.type]; if (!target) fail(400, 'Invalid content type.');
-  await existing(target[0], req.body.id);
+  const reportTarget=await existing(target[0],req.body.id);
+  if(req.body.type==='post')await requireGroupRead(query,reportTarget.group_id,req.user.id);
+  if(req.body.type==='comment'){const parent=await existing('posts',reportTarget.post_id);await requireGroupRead(query,parent.group_id,req.user.id);}
   await query('INSERT INTO reports(user_id,target_type,target_id,reason) VALUES(?,?,?,?)', [req.user.id, req.body.type, id(req.body.id), text(req.body.reason, 2000)]);
   res.status(201).json({ ok: true });
 });

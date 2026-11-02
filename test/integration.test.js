@@ -17,7 +17,8 @@ test('MySQL-backed community workflows and access controls', { skip: process.env
   try {
     const oldSchema = await (await import('node:fs/promises')).readFile(new URL('../schema.sql', import.meta.url), 'utf8');
     for (const statement of oldSchema.split(';').map(s => s.trim()).filter(Boolean)) await seed.query(statement);
-    await seed.query('ALTER TABLE community_groups DROP COLUMN image'); // Exercise upgrade from an existing group table.
+    await seed.query('ALTER TABLE community_groups DROP COLUMN image');
+    await seed.query('ALTER TABLE community_groups DROP COLUMN visibility'); // Exercise upgrade from an existing group table.
     const bcrypt = (await import('bcryptjs')).default;
     await seed.execute('INSERT INTO users(name,email,password,is_admin,bio) VALUES(?,?,?,?,?)', ['Retired admin', 'retired@example.com', await bcrypt.hash('legacy-password-123', 4), true, 'Legacy account']);
     await seed.query("CREATE TABLE user_badges(user_id INT UNSIGNED NOT NULL,badge ENUM('developer') NOT NULL,PRIMARY KEY(user_id,badge),FOREIGN KEY(user_id) REFERENCES users(id))");
@@ -503,6 +504,55 @@ test('MySQL-backed community workflows and access controls', { skip: process.env
 
     assert.equal((await a('/verification')).enabled,false);
     await a('/verification/attempts','POST',{consent:true},503);
+
+
+    // Closed groups require approval and protect all content entry points.
+    const groupOwner=client();await groupOwner('/session');
+    await groupOwner('/register','POST',{name:'Group owner',email:'groupowner@example.com',password:'a-long-password-123',agree:true},201);
+    const groupOwnerId=(await groupOwner('/session')).user.id;await approveMember(groupOwner,groupOwnerId);
+    const closed=await groupOwner('/groups','POST',{name:'Closed circle',description:'Approval required',visibility:'closed'},201);
+    const privatePhoto=await groupOwner('/uploads','POST',multipart(photo),201);
+    const closedPost=await groupOwner('/posts','POST',{body:'Members-only conversation',group_id:closed.id,image:privatePhoto.url},201);
+    await b('/posts?group='+closed.id,'GET',undefined,403);
+    assert.equal((await b('/posts?post='+closedPost.id)).length,0);
+    await b('/posts/'+closedPost.id+'/comments','GET',undefined,403);
+    await b('/posts/'+closedPost.id+'/comments','POST',{body:'Cannot comment'},403);
+    await b('/posts/'+closedPost.id+'/like','POST',{active:true},403);
+    await b('/posts','POST',{body:'Cannot post',group_id:closed.id,image:''},403);
+    await b('/reports','POST',{type:'post',id:closedPost.id,reason:'Cannot inspect'},403);
+    await b(privatePhoto.url.slice(4),'GET',undefined,403);
+    await admin(privatePhoto.url.slice(4),'GET',undefined,403);
+    assert.equal((await b('/groups/'+closed.id+'/join','POST',{active:true})).status,'pending');
+    assert.equal((await b('/groups')).find(g=>g.id===closed.id).joined,0);
+    assert.equal((await b('/groups')).find(g=>g.id===closed.id).join_requested,1);
+    await b('/groups/'+closed.id+'/requests','GET',undefined,403);
+    await b('/groups/'+closed.id+'/requests/'+userB.id,'POST',{action:'approve'},403);
+    await admin('/groups/'+closed.id+'/requests/'+userB.id,'POST',{action:'approve'},403);
+    await b('/groups/'+closed.id+'/join','POST',{active:true});
+    assert.equal((await groupOwner('/groups/'+closed.id+'/requests')).length,1);
+    await b('/groups/'+closed.id+'/join','POST',{active:false});
+    assert.equal((await groupOwner('/groups/'+closed.id+'/requests')).length,0);
+    await b('/groups/'+closed.id+'/join','POST',{active:true});
+    await groupOwner('/groups/'+closed.id+'/requests/'+userB.id,'POST',{action:'reject'});
+    await b('/posts?group='+closed.id,'GET',undefined,403);
+    await b('/groups/'+closed.id+'/join','POST',{active:true});
+    await groupOwner('/groups/'+closed.id+'/requests/'+userB.id,'POST',{action:'approve'});
+    assert.equal((await b('/posts?group='+closed.id))[0].body,'Members-only conversation');
+    assert.equal((await b(privatePhoto.url.slice(4))).type,'image/webp');
+    await b('/posts/'+closedPost.id+'/comments','POST',{body:'Now a member'},201);
+    await b('/reports','POST',{type:'post',id:closedPost.id,reason:'Moderation review'},201);
+    assert.equal((await admin(privatePhoto.url.slice(4))).type,'image/webp','Reported closed-group image is available for staff review');
+    await b('/groups/'+closed.id+'/join','POST',{active:false});
+    await b('/posts/'+closedPost.id+'/comments','GET',undefined,403);
+    await b(privatePhoto.url.slice(4),'GET',undefined,403);
+    await groupOwner('/groups/'+closed.id,'PATCH',{name:'Closed circle',description:'Now open',visibility:'open'});
+    assert.equal((await b('/posts?group='+closed.id)).length,1);
+    assert.equal((await b('/groups/'+closed.id+'/join','POST',{active:true})).status,'joined');
+    await groupOwner('/groups/'+closed.id,'PATCH',{name:'Closed circle',description:'Closed again',visibility:'closed'});
+    assert.equal((await b('/posts?group='+closed.id)).length,1,'Existing members remain after closing');
+    await c('/posts?group='+closed.id,'GET',undefined,403);
+    await groupOwner('/groups/'+closed.id,'PATCH',{name:'Closed circle',description:'Invalid mode',visibility:'invalid'},400);
+    await groupOwner('/groups/'+closed.id+'/join','POST',{active:false},400);
 
     await a('/admin/logs','GET',undefined,403);
     await a('/admin/reports','GET',undefined,403);
