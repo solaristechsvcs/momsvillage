@@ -332,7 +332,7 @@ app.get('/version', (req, res) => {
 });
 app.use(express.static(fileURLToPath(new URL('./public', import.meta.url)), {
   etag: false, lastModified: false,
-  setHeaders: res => res.set('Cache-Control', 'no-store').set('CDN-Cache-Control', 'no-store')
+  setHeaders: (res,path) => {const policy=path.endsWith('moms-village-logo-v1.png')?'public, max-age=31536000, immutable':'no-store';res.set('Cache-Control',policy).set('CDN-Cache-Control',policy);}
 }));
 app.use((error, req, res, next) => {
   if (res.headersSent) return next(error);

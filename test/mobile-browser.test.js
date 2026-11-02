@@ -31,7 +31,7 @@ test('responsive pages, mobile menu, dialogs and chat fit real browser viewports
  async function fits(label){const dims=await page.evaluate(()=>({width:innerWidth,body:document.documentElement.scrollWidth}));assert.ok(dims.body<=dims.width+1,label+': '+JSON.stringify(dims));}
  try{
   for(const width of [320,375,390,768,1280]){
-   await page.setViewportSize({width,height:844});signedIn=false;await page.goto(url);await page.locator('.landing-top').waitFor();await fits('Landing '+width);
+   await page.setViewportSize({width,height:844});signedIn=false;await page.goto(url);await page.locator('.landing-top').waitFor();await page.waitForFunction(()=>{const img=document.querySelector('.brand-art img');return img?.complete&&img.naturalWidth>0;});await fits('Landing '+width);
    signedIn=true;await page.goto(url+'/?member=1#feed');await page.locator('.composer').waitFor();await fits('Feed '+width);
    if(width<=700){const menu=page.locator('.mobile-nav-toggle');assert.equal(await menu.isVisible(),true);await menu.click();await page.locator('.sidebar a[href="#admin"]').click();}
    else await page.locator('.sidebar a[href="#admin"]').click();
