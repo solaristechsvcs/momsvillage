@@ -93,3 +93,29 @@ test('admin reviews require confirmation and invitation secrets are displayed on
     assert.ok(w.document.querySelector('[data-action="revoke-invitation"]'));
   } finally { ui.close(); }
 });
+
+test('Invite Logs filters records and verifies full codes without displaying secrets', {skip:process.env.MV_UI!=='1',timeout:10000},async()=>{
+ const row={id:4,issuer_id:1,issuer_name:'<script>Owner</script>',issuer_email:'owner@example.com',suffix:'abcdef',created_at:'2026-01-01',expires_at:'2099-01-01',status:'active'};
+ const calls=[];
+ const ui=await bootUI('admin/invite-logs',async(url,opts={})=>{
+  calls.push([url,opts]);
+  if(url==='/api/session')return response({user:{id:1,name:'Owner',admin:true,membership_status:'approved'},csrf:'test',membership_policy:policy});
+  if(url==='/api/unread')return response({messages:0,notifications:0});
+  if(url.startsWith('/api/admin/invite-logs?'))return response({logs:[row],next_before:null});
+  if(url==='/api/admin/invite-logs/verify'){assert.equal(JSON.parse(opts.body).code,'a'.repeat(48));return response({found:true,invitation:row});}
+  assert.fail('Unexpected URL '+url);
+ });
+ try{
+  const w=ui.w;await waitFor(()=>w.document.querySelector('[data-invite-verify]'));
+  assert.ok(w.document.querySelector('.admin-tabs').textContent.includes('Invite Logs'));
+  assert.equal(w.document.querySelector('#main script'),null);
+  const f=w.document.querySelector('[data-invite-verify]');f.elements.code.value='a'.repeat(48);
+  f.dispatchEvent(new w.Event('submit',{bubbles:true,cancelable:true}));
+  await waitFor(()=>f.querySelector('[data-invite-result]').textContent.includes('active'));
+  assert.equal(f.elements.code.value,'');
+  assert.equal(w.location.hash.includes('a'.repeat(48)),false);
+  const filter=w.document.querySelector('[data-invite-filter]');filter.elements.issuer.value='1';filter.elements.status.value='used';
+  filter.dispatchEvent(new w.Event('submit',{bubbles:true,cancelable:true}));
+  await waitFor(()=>calls.some(([url])=>url.includes('issuer=1&status=used')));
+ }finally{ui.close();}
+});
