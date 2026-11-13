@@ -95,7 +95,7 @@ app.get('/api/session', async (req, res) => {
   req.session.csrf ??= randomBytes(32).toString('hex');
   const [user] = req.session.userId ? await query(`SELECT u.*,${authColumns()},EXISTS(SELECT 1 FROM member_verifications own_check WHERE own_check.user_id=u.id AND own_check.current_attempt_id IS NOT NULL) AS has_verification_data,a.status AS membership_status,${badgeColumns()} FROM users u LEFT JOIN membership_applications a ON a.user_id=u.id WHERE u.id=?`, [req.session.userId]) : [];
   if(user && !sameAuthVersion(req.session.authVersion ?? 0,user.auth_version)) { await new Promise((resolve,reject)=>req.session.regenerate(err=>err?reject(err):resolve())); req.session.csrf=randomBytes(32).toString('hex'); return res.json({csrf:req.session.csrf,user:null}); }
-  res.json({ csrf: req.session.csrf, user: user ? { ...publicUser(user), email: user.email, admin: isAdmin(user), membership_status: membershipStatus(user), has_verification_data: !!user.has_verification_data, must_change_password: !!user.must_change_password } : null, membership_policy: { ...membershipPolicy, invite_only: config.membership?.inviteOnly === true } });
+  res.json({ csrf: req.session.csrf, user: user ? { ...publicUser(user), email: user.email, admin: isAdmin(user), membership_status: membershipStatus(user), has_verification_data: !!user.has_verification_data, must_change_password: !!user.must_change_password } : null, membership_policy: { ...membershipPolicy, invite_only: true } });
 });
 app.use('/api', (req, res, next) => {
   if (['GET', 'HEAD', 'OPTIONS'].includes(req.method)) return next();

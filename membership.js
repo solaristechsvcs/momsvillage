@@ -25,25 +25,39 @@ async function transaction(db, work) {
   catch (error) { await connection.rollback(); throw error; }
   finally { connection.release(); }
 }
-async function redeemInvitation(execute, rawCode, applicantId, fail) {
-  const code = text(rawCode, 100);
-  if (!/^[a-f0-9]{48}$/.test(code)) fail(400, 'Invitation code is invalid, expired, revoked, or already used.');
-  const hash = createHash('sha256').update(code).digest('hex');
-  const [invitation] = await execute('SELECT * FROM membership_invitations WHERE code_hash=? FOR UPDATE', [hash]);
-  if (!invitation || invitation.revoked || invitation.used_by || new Date(invitation.expires_at) <= new Date()) fail(400, 'Invitation code is invalid, expired, revoked, or already used.');
-  const [issuer] = await execute('SELECT u.id FROM users u WHERE u.id=? AND u.banned=FALSE AND ' + approvedMemberSql(), [invitation.issuer_id]);
-  if (!issuer || invitation.issuer_id === applicantId) fail(400, 'This invitation is unavailable.');
-  await execute('UPDATE membership_invitations SET used_by=?,used_at=UTC_TIMESTAMP() WHERE id=?', [applicantId, invitation.id]);
-  await execute('INSERT INTO membership_referrals(applicant_id,invitation_id) VALUES(?,?)', [applicantId, invitation.id]);
+async function validateInvitation(execute,rawCode,fail){
+ const code=text(rawCode,100);
+ if(!/^[a-f0-9]{48}$/.test(code))fail(400,'Invitation code is invalid, expired, revoked, or already used.');
+ const hash=createHash('sha256').update(code).digest('hex');
+ const [invitation]=await execute('SELECT * FROM membership_invitations WHERE code_hash=? FOR UPDATE',[hash]);
+ if(!invitation||invitation.revoked||invitation.used_by||new Date(invitation.expires_at)<=new Date())fail(400,'Invitation code is invalid, expired, revoked, or already used.');
+ const [issuer]=await execute('SELECT u.id FROM users u WHERE u.id=? AND u.banned=FALSE AND '+approvedMemberSql()+' FOR UPDATE',[invitation.issuer_id]);
+ if(!issuer)fail(400,'This invitation is unavailable.');
+ return invitation;
+}
+async function redeemInvitation(execute,rawCode,applicantId,fail,validated=null){
+ const invitation=validated??await validateInvitation(execute,rawCode,fail);
+ if(invitation.issuer_id===applicantId)fail(400,'This invitation is unavailable.');
+ await execute('UPDATE membership_invitations SET used_by=?,used_at=UTC_TIMESTAMP() WHERE id=?',[applicantId,invitation.id]);
+ await execute('INSERT INTO membership_referrals(applicant_id,invitation_id) VALUES(?,?)',[applicantId,invitation.id]);
+ await execute("INSERT INTO admin_audit(actor_id,target_id,action) VALUES(?,?,'invitation_redeem')",[applicantId,invitation.issuer_id]);
 }
 export async function registerMembership({ db, body, passwordHash, email, name, requestedAdmin, config, fail }) {
   const input = requestedAdmin ? { reason: '', referral: '' } : applicationInput(body, fail);
   const invitation = text(body.invitation_code ?? '', 100, false);
-  if (!requestedAdmin && config.membership?.inviteOnly === true && !invitation) fail(400, 'An invitation code is required to apply.');
+  if (!requestedAdmin && !invitation) fail(400, 'An invitation code is required to apply.');
   return transaction(db, async execute => {
+    let validated=null;
+    if(invitation)validated=await validateInvitation(execute,invitation,fail);
+    else {
+      // Only the first administrator bootstrap may lack an inviter.
+      // The server has already verified the reserved email and setup secret.
+      const existing=await execute('SELECT u.id FROM users u WHERE u.is_admin=TRUE OR '+approvedMemberSql()+' FOR UPDATE');
+      if(!requestedAdmin||existing.length)fail(400,'An invitation code is required to create an account.');
+    }
     const result = await execute('INSERT INTO users(name,email,password,city,bio,is_admin) VALUES(?,?,?,?,?,?)', [name, email, passwordHash, text(body.city ?? '', 120, false), '', requestedAdmin]);
     await execute('INSERT INTO membership_applications(user_id,status,eligibility_confirmed,reason,referral,policy_version,submitted_at) VALUES(?,?,?,?,?,?,' + (requestedAdmin ? 'NULL' : 'UTC_TIMESTAMP()') + ')', [result.insertId, requestedAdmin ? 'approved' : 'pending', !requestedAdmin, input.reason, input.referral, requestedAdmin ? '' : membershipPolicy.version]);
-    if (invitation && !requestedAdmin) await redeemInvitation(execute, invitation, result.insertId, fail);
+    if (validated) await redeemInvitation(execute, invitation, result.insertId, fail,validated);
     return result.insertId;
   });
 }
@@ -56,7 +70,7 @@ export function membershipRouter({ db, query, config, fail, requireApproved, req
     const [referral] = await query('SELECT 1 FROM membership_referrals WHERE applicant_id=?', [userId]);
     return { ...application, has_invitation: !!referral };
   }
-  router.get('/membership', async (req, res) => res.json({ status: membershipStatus(req.user), application: await applicantRecord(req.user.id), policy: membershipPolicy, invite_only: config.membership?.inviteOnly === true }));
+  router.get('/membership', async (req, res) => res.json({ status: membershipStatus(req.user), application: await applicantRecord(req.user.id), policy: membershipPolicy, invite_only: true }));
   router.put('/membership/application', applyLimit, async (req, res) => {
     const input = applicationInput(req.body, fail), code = text(req.body.invitation_code ?? '', 100, false);
     await transaction(db, async execute => {
@@ -69,12 +83,12 @@ export function membershipRouter({ db, query, config, fail, requireApproved, req
         if (referral) fail(400, 'This application already has an invitation.');
         await redeemInvitation(execute, code, req.user.id, fail);
       }
-      if (config.membership?.inviteOnly === true && !referral && !code) fail(400, 'An invitation code is required to apply.');
+      if (!referral && !code) fail(400, 'An invitation code is required to apply.');
       await execute("UPDATE membership_applications SET status='pending',eligibility_confirmed=TRUE,reason=?,referral=?,policy_version=?,revision=revision+1,review_message='',reviewed_by=NULL,reviewed_at=NULL,submitted_at=UTC_TIMESTAMP() WHERE user_id=?", [input.reason, input.referral, membershipPolicy.version, req.user.id]);
     });
     res.json({ ok: true });
   });
-  router.get('/invitations', requireApproved, async (req, res) => res.json(await query('SELECT id,suffix,expires_at,revoked,used_at,created_at FROM membership_invitations WHERE issuer_id=? ORDER BY id DESC LIMIT 100', [req.user.id])));
+  router.get('/invitations', requireApproved, async (req, res) => res.json(await query('SELECT i.id,i.suffix,i.expires_at,i.revoked,i.used_at,i.created_at,i.used_by,u.name AS used_by_name FROM membership_invitations i LEFT JOIN users u ON u.id=i.used_by WHERE i.issuer_id=? ORDER BY i.id DESC LIMIT 100', [req.user.id])));
   router.post('/invitations', requireApproved, async (req, res) => {
     const code = randomBytes(24).toString('hex');
     await transaction(db, async execute => {
@@ -84,6 +98,7 @@ export function membershipRouter({ db, query, config, fail, requireApproved, req
       const [counts] = await execute('SELECT SUM(revoked=FALSE AND used_by IS NULL AND expires_at>UTC_TIMESTAMP()) AS active,SUM(created_at>DATE_SUB(UTC_TIMESTAMP(),INTERVAL 7 DAY)) AS recent FROM membership_invitations WHERE issuer_id=?', [req.user.id]);
       if (Number(counts.active) >= 5 || Number(counts.recent) >= 20) fail(429, 'You may have 5 active invitations and create up to 20 per week.');
       await execute('INSERT INTO membership_invitations(issuer_id,code_hash,suffix,expires_at) VALUES(?,?,?,DATE_ADD(UTC_TIMESTAMP(),INTERVAL 14 DAY))', [req.user.id, createHash('sha256').update(code).digest('hex'), code.slice(-6)]);
+      await execute("INSERT INTO admin_audit(actor_id,target_id,action) VALUES(?,?,'invitation_generate')",[req.user.id,req.user.id]);
     });
     res.status(201).json({ code, expires_in_days: 14 });
   });
@@ -96,8 +111,28 @@ export function membershipRouter({ db, query, config, fail, requireApproved, req
       if (!actor.is_admin && invitation.issuer_id !== actor.id) fail(403, 'You can only revoke your own invitations.');
       if (invitation.used_by) fail(400, 'Used invitations cannot be revoked. Review the member application instead.');
       await execute('UPDATE membership_invitations SET revoked=TRUE WHERE id=?', [invitation.id]);
+      if(!invitation.revoked)await execute("INSERT INTO admin_audit(actor_id,target_id,action) VALUES(?,?,'invitation_revoke')",[req.user.id,invitation.issuer_id]);
     });
     res.json({ ok: true });
+  });
+  const logSelect="SELECT i.id,i.issuer_id,i.suffix,i.created_at,i.expires_at,i.revoked,i.used_by,i.used_at,u.name AS issuer_name,u.email AS issuer_email,v.name AS used_by_name,v.email AS used_by_email,CASE WHEN i.used_by IS NOT NULL THEN 'used' WHEN i.revoked THEN 'revoked' WHEN i.expires_at<=UTC_TIMESTAMP() THEN 'expired' WHEN u.banned OR NOT "+approvedMemberSql()+" THEN 'unavailable' ELSE 'active' END AS status FROM membership_invitations i JOIN users u ON u.id=i.issuer_id LEFT JOIN users v ON v.id=i.used_by";
+  router.get('/admin/invite-logs',requireApproved,requireAdmin,async(req,res)=>{
+    const where=[],values=[];
+    if(req.query.issuer){where.push('i.issuer_id=?');values.push(id(req.query.issuer));}
+    if(req.query.before){where.push('i.id<?');values.push(id(req.query.before));}
+    const status=req.query.status||'all';
+    if(!['all','active','used','revoked','expired','unavailable'].includes(status))fail(400,'Invalid status.');
+    let sql=logSelect+(where.length?' WHERE '+where.join(' AND '):'');
+    if(status!=='all'){sql+=' HAVING status=?';values.push(status);}
+    const rows=await query(sql+' ORDER BY i.id DESC LIMIT 101',values),logs=rows.slice(0,100);
+    res.json({logs,next_before:rows.length>100?logs.at(-1).id:null});
+  });
+  const verifyLimit=rateLimit({windowMs:60000,limit:20,keyGenerator:req=>String(req.user.id),standardHeaders:'draft-8',legacyHeaders:false});
+  router.post('/admin/invite-logs/verify',requireApproved,requireAdmin,verifyLimit,async(req,res)=>{
+    const code=text(req.body.code??'',100,false);
+    if(!/^[a-f0-9]{48}$/.test(code))return res.json({found:false});
+    const [invitation]=await query(logSelect+' WHERE i.code_hash=?',[createHash('sha256').update(code).digest('hex')]);
+    res.json(invitation?{found:true,invitation}:{found:false});
   });
   router.get('/admin/invitations', requireApproved, requireAdmin, async (req, res) => res.json(await query('SELECT i.id,i.issuer_id,i.suffix,i.expires_at,i.revoked,i.used_at,i.created_at,u.name AS issuer_name FROM membership_invitations i JOIN users u ON u.id=i.issuer_id ORDER BY i.id DESC LIMIT 200')));
   router.get('/admin/membership-applications', requireApproved, requireAdmin, async (req, res) => {
@@ -127,7 +162,7 @@ export function membershipRouter({ db, query, config, fail, requireApproved, req
       if (target.is_admin && action !== 'approve') fail(400, 'Revoke administrator access before restricting this membership.');
       if (target.banned) fail(400, 'Restore the account before reviewing its membership.');
       if (action === 'approve' && !target.is_admin && (!application.eligibility_confirmed || !application.submitted_at || !application.reason.trim())) fail(400, 'The member must submit an eligibility confirmation and application first.');
-      if (action === 'approve' && config.membership?.inviteOnly === true && !target.is_admin) {
+      if (action === 'approve' && !target.is_admin) {
         const [[referral]] = await connection.execute('SELECT 1 FROM membership_referrals WHERE applicant_id=?', [targetId]);
         if (!referral) fail(400, 'An invitation is required before approval.');
       }

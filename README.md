@@ -207,3 +207,12 @@ Owners choose Open or Closed when creating or editing a group. Open groups let a
 All existing groups default to Open. Closed groups remain discoverable by approved members, with their name, picture, description, and member count visible. Posts and comments require group membership, including direct post links, likes, comments and reporting. Uploaded post pictures used only in closed groups are protected too; the uploader keeps access to their own image library. Images also used in public profiles, listings, group covers, or accessible posts remain accessible through those uses. Images on external hosts follow those hosts' access rules. Administrators can review reported posts and their uploaded images through the existing moderation workflow.
 
 Startup automatically adds community_groups.visibility and creates group_join_requests. No manual SQL or configuration change is required. Tests exercise existing-schema upgrades, approval/rejection/cancellation, authorization, direct links and images, privacy changes, and retaining existing membership.
+
+
+### Required invitations (0.9.0)
+
+Signup requires a valid unused invitation from an approved, unsuspended member. Missing, invalid, expired, revoked and used codes prevent account creation regardless of the legacy inviteOnly setting. Codes expire after 14 days and do not bypass review. Members generate codes under Invitations; administrators use Administration > Invitations. Generation and redemption are recorded against accounts.
+
+Administration > Invite Logs shows generating accounts, dates, status and recipients, filters by user/status, and verifies pasted full codes. Full codes are shown once and stored only as hashes. Administrative profiles link to invitation history.
+
+Only the first administrator of a fresh installation may bootstrap without an invitation using the reserved email and setup secret, while no administrator or approved member exists. Supplied invalid codes always fail. Later administrator registrations require invitations.

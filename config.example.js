@@ -10,7 +10,7 @@ export default {
     autoApproveThreshold: 95, autoApprove: true,
     retentionHours: 72
   },
-  membership: { inviteOnly: false }, // true requires an invitation to apply; all applicants still need review.
+  membership: { inviteOnly: true }, // Invitations are required; false no longer disables this requirement.
   uploadsDirectory: './uploads', // Persistent writable directory. Existing configs default to this.
   sessionSecret: 'REPLACE_WITH_A_UNIQUE_RANDOM_SECRET_AT_LEAST_32_CHARACTERS',
   secureCookies: false, // true when publicUrl uses HTTPS

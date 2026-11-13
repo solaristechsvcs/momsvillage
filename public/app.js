@@ -249,7 +249,7 @@ function adminMemberRow(user) {
 }
 async function adminProfileModal(memberId) {
   const user = await api(`/admin/users/${memberId}/profile`);
-  modal(user.name, `<div class="profile-cover"></div>${avatar(user)}${memberBadges(user)}<p><span class="pill">${user.is_admin ? 'Administrator' : 'Member'}${user.banned ? ' / Suspended' : ''}</span></p><p class="muted">${esc(user.email)}<br>${esc(user.city || 'No city shared')}</p><p class="member-info">${esc(user.bio || 'No biography shared yet.')}</p><small>Joined ${esc(new Date(user.created_at).toLocaleDateString())}</small>`,typeof sharedChildrenSection==='function'?sharedChildrenSection(user.children):'');
+  modal(user.name, `<div class="profile-cover"></div>${avatar(user)}${memberBadges(user)}<p><span class="pill">${user.is_admin ? 'Administrator' : 'Member'}${user.banned ? ' / Suspended' : ''}</span></p><p class="muted">${esc(user.email)}<br>${esc(user.city || 'No city shared')}</p><p class="member-info">${esc(user.bio || 'No biography shared yet.')}</p><small>Joined ${esc(new Date(user.created_at).toLocaleDateString())}</small><p><a href="#admin/invite-logs?issuer=${user.id}" data-action="close">View invitation history</a></p>`,typeof sharedChildrenSection==='function'?sharedChildrenSection(user.children):'');
 }
 
 function memberBadges(user) {
@@ -269,11 +269,12 @@ function latestCommentPreview(comment) {
 
 async function administrationPage(route) {
   if(!me.admin) return empty('Administrator access required.','Choose another page.');
-  const tabs={users:'Users',announcements:'Announcements',applications:'Membership',verification:'Verification review',moderation:'Moderation',logs:'Logs',invitations:'Invitations'};
+  const tabs={users:'Users',announcements:'Announcements',applications:'Membership',verification:'Verification review',moderation:'Moderation',logs:'Logs',invitations:'Invitations','invite-logs':'Invite Logs'};
   const section=route.split('?')[0].split('/')[1] || 'users';
   if(!Object.hasOwn(tabs,section)) return empty('Administration page unavailable.','Choose Administration from the navigation.');
   const params=new URLSearchParams(route.split('?')[1]);
   let html=heading('Administration','Manage your village from one place.')+`<nav class="admin-tabs" aria-label="Administration sections">${Object.entries(tabs).map(([key,label])=>`<a href="#admin/${key}" class="${section===key?'active':''}" ${section===key?'aria-current="page"':''}>${esc(label)}</a>`).join('')}</nav>`;
+  if(section==='invite-logs')return html+await inviteLogsPage(route);
   if(section==='announcements')return html+await announcementAdminPage();
   if(section==='applications') return html+await membershipPage(route);
   if(section==='verification') return html+await verificationPage(route);

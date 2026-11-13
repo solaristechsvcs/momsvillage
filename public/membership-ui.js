@@ -1,4 +1,4 @@
-let applicationPolicy = { text: 'Moms Village is a private community for mothers aged 18 and older.', confirmation: 'I am a mother, am at least 18 years old, and meet the mothers-only membership policy.', invite_only: false };
+let applicationPolicy = { text: 'Moms Village is a private community for mothers aged 18 and older.', confirmation: 'I am a mother, am at least 18 years old, and meet the mothers-only membership policy.', invite_only: true };
 let applicationReviews = [];
 const membershipActions = new Set(['membership-refresh','review-member','membership-review','create-invitation','copy-invitation','revoke-invitation']);
 
@@ -6,7 +6,7 @@ function eligibilityField(checked = false) {
   return `<label class="check"><input type="checkbox" name="eligibility_confirmed" required ${checked ? 'checked' : ''}><span>${esc(applicationPolicy.confirmation)}</span></label>`;
 }
 function membershipRegistrationFields() {
-  return `<fieldset class="application-fields"><legend>Membership application</legend><p class="hint">${esc(applicationPolicy.text)}</p>${field('application_reason','What would you like from this community?',{ type:'textarea',max:1500 })}${field('referral','How did you hear about us? (optional)',{ max:200,required:false })}${field('invitation_code',applicationPolicy.invite_only ? 'Invitation code' : 'Invitation code (optional)',{ max:100,required:applicationPolicy.invite_only })}${eligibilityField()}<p class="hint">Applications are private to you and administrators. Please do not include children’s names, photos, medical records, or other sensitive documents. Invitations do not bypass review.</p></fieldset>`;
+  return `<fieldset class="application-fields"><legend>Membership application</legend><p class="hint">${esc(applicationPolicy.text)}</p>${field('application_reason','What would you like from this community?',{ type:'textarea',max:1500 })}${field('referral','How did you hear about us? (optional)',{ max:200,required:false })}${field('invitation_code','Invitation code',{ max:100,required:true })}${eligibilityField()}<p class="hint">Applications are private to you and administrators. Please do not include children’s names, photos, medical records, or other sensitive documents. Invitations do not bypass review.</p></fieldset>`;
 }
 async function renderMembershipGate() {
   const data = await api('/membership');
@@ -29,13 +29,13 @@ function invitationRows(rows, admin = false) {
   return rows.map(i => {
     const expired = new Date(i.expires_at) <= new Date();
     const state = i.used_at ? 'Used' : i.revoked ? 'Revoked' : expired ? 'Expired' : 'Active';
-    return `<div class="admin-row"><strong>Invitation …${esc(i.suffix)}</strong> <span class="pill">${state}</span>${admin ? `<p>Issued by ${esc(i.issuer_name)}</p>` : ''}<small>Expires ${esc(date(i.expires_at))}</small>${state === 'Active' ? `<button class="secondary" data-action="revoke-invitation" data-id="${i.id}">Revoke invitation</button>` : ''}</div>`;
+    return `<div class="admin-row"><strong>Invitation …${esc(i.suffix)}</strong> <span class="pill">${state}</span>${admin ? `<p>Issued by ${esc(i.issuer_name)}</p>` : ''}<small>Created ${esc(date(i.created_at))} · Expires ${esc(date(i.expires_at))}</small>${i.used_by_name ? "<p>Used by "+esc(i.used_by_name)+" on "+esc(date(i.used_at))+"</p>" : ""}${state === 'Active' ? `<button class="secondary" data-action="revoke-invitation" data-id="${i.id}">Revoke invitation</button>` : ''}</div>`;
   }).join('') || '<p class="muted">No invitations yet.</p>';
 }
 async function membershipPage(route, view=page) {
   if (view === 'invitations') {
     const rows = await api('/invitations');
-    return heading('Invite someone you trust','Invitations support an application. Every new member still needs approval.','create-invitation','Create invitation') + '<p class="hint">Each code can be used once, expires after 14 days and is displayed only when created. You may have 5 active codes and issue 20 per week. Share privately with a mother who meets the community policy.</p><section class="card">' + invitationRows(rows) + '</section>';
+    return heading('Invite someone you trust','Invitations support an application. Every new member still needs approval.','create-invitation','Create invitation') + '<p class="hint">Each code can be used once, expires after 14 days and is displayed only when created. You may have 5 active codes and issue 20 per week. Share privately with a mother who meets the community policy. Generation and use are recorded on your account and visible to administrators.</p><section class="card">' + invitationRows(rows) + '</section>';
   }
   if (!me.admin) return empty('Administrator access required.','Choose another page from the navigation.');
   const params = new URLSearchParams(route.split('?')[1]), status = params.get('status') ?? 'pending', member = params.get('user');
@@ -88,8 +88,28 @@ async function handleMembershipSubmit(f) {
   } catch (error) { f.querySelector('.form-error').textContent = error.message; }
   finally { submit.disabled = false; }
 }
-document.addEventListener('input', event => {
-  if (event.target.name !== 'setup_code') return;
-  const fields = event.target.closest('form')?.querySelector('.application-fields');
-  if (fields) { fields.disabled = !!event.target.value.trim(); fields.hidden = fields.disabled; }
+
+async function inviteLogsPage(route){
+ const params=new URLSearchParams(route.split('?')[1]||'');
+ const data=await api('/admin/invite-logs?'+params);
+ return heading('Invite Logs','Review invitation generation and use.')+
+ '<section class="card"><form data-invite-filter><label>Generating user ID<input name="issuer" type="number" min="1" value="'+esc(params.get('issuer')||'')+'"></label><label>Status<select name="status">'+['all','active','used','revoked','expired','unavailable'].map(x=>'<option '+(params.get('status')===x?'selected ':'')+'value="'+x+'">'+x+'</option>').join('')+'</select></label><button>Filter</button></form></section>'+
+ '<section class="card"><h2>Verify a code</h2><form data-invite-verify><label>Full invitation code<input name="code" required maxlength="100" autocomplete="off"></label><button>Verify code</button><p class="form-error"></p><div data-invite-result aria-live="polite"></div></form></section>'+
+ '<section class="card">'+(data.logs.map(inviteLogRow).join('')||'<p>No invitations match.</p>')+'</section>'+
+ (data.next_before?'<a href="#admin/invite-logs?'+esc(new URLSearchParams({...Object.fromEntries(params),before:data.next_before}).toString())+'">Older entries</a>':'');
+}
+function inviteLogRow(i){
+ return '<article class="admin-row"><strong>Invitation #'+i.id+' · …'+esc(i.suffix)+'</strong> <span class="pill">'+esc(i.status)+'</span><p>Generated by <button class="profile-link" data-action="admin-profile" data-id="'+i.issuer_id+'">'+esc(i.issuer_name)+'</button> (#'+i.issuer_id+') · '+esc(i.issuer_email)+'</p><small>Created '+esc(date(i.created_at))+' · Expires '+esc(date(i.expires_at))+'</small>'+(i.used_by?'<p>Used by <button class="profile-link" data-action="admin-profile" data-id="'+i.used_by+'">'+esc(i.used_by_name)+'</button> · '+esc(i.used_by_email)+' · '+esc(date(i.used_at))+'</p>':'')+(i.status==='active'?'<button class="secondary" data-action="revoke-invitation" data-id="'+i.id+'">Revoke invitation</button>':'')+'</article>';
+}
+document.addEventListener('submit',async event=>{
+ const f=event.target;
+ if(f.matches('[data-invite-filter]')){event.preventDefault();location.hash='admin/invite-logs?'+new URLSearchParams(new FormData(f));return;}
+ if(!f.matches('[data-invite-verify]'))return;
+ event.preventDefault();const button=f.querySelector('button');button.disabled=true;
+ try{
+  const result=await api('/admin/invite-logs/verify','POST',{code:f.elements.code.value.trim()});
+  f.elements.code.value='';f.querySelector('.form-error').textContent='';
+  f.querySelector('[data-invite-result]').innerHTML=result.found?inviteLogRow(result.invitation):'<p>Code not found or invalid. It cannot be used to create an account.</p>';
+ }catch(error){f.querySelector('.form-error').textContent=error.message;}
+ finally{button.disabled=false;}
 });

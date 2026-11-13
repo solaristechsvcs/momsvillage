@@ -10,7 +10,7 @@ test('MySQL-backed community workflows and access controls', { skip: process.env
   let exists = true; try { await access(configFile); } catch { exists = false; }
   assert.equal(exists, false, 'Refusing to overwrite an existing config.js. Integration tests are for disposable CI databases only.');
   const code = randomBytes(32).toString('hex');
-  await writeFile(configFile, `export default ${JSON.stringify({ host: '127.0.0.1', port: 3099, sessionSecret: randomBytes(48).toString('hex'), secureCookies: false, trustProxy: 1, mysql: { host: '127.0.0.1', port: 3306, user: 'root', password: 'integration-only-password', database: 'momsvillage_test' }, adminEmails: ['admin@example.com'], adminRegistrationCode: code })}`, { flag: 'wx', mode: 0o600 });
+  await writeFile(configFile, `export default ${JSON.stringify({ host: '127.0.0.1', port: 3099, sessionSecret: randomBytes(48).toString('hex'), secureCookies: false, trustProxy: 1, mysql: { host: '127.0.0.1', port: 3306, user: 'root', password: 'integration-only-password', database: 'momsvillage_test' }, membership:{inviteOnly:false}, adminEmails: ['admin@example.com'], adminRegistrationCode: code })}`, { flag: 'wx', mode: 0o600 });
   // Seed an old admin flag whose email was removed from the previous allowlist.
   const mysql = (await import('mysql2/promise')).default;
   const seed = await mysql.createConnection({ host: '127.0.0.1', port: 3306, user: 'root', password: 'integration-only-password', database: 'momsvillage_test' });
@@ -46,6 +46,7 @@ test('MySQL-backed community workflows and access controls', { skip: process.env
       const request=async (path, method = 'GET', body, status = 200, withCsrf = true) => {
         console.log('[integration]', method, path);
         if (path === '/register') body = { eligibility_confirmed:true, application_reason:'I am a mother looking for a supportive community.', ...body };
+        if(path==='/register' && status===201 && body.email!=='admin@example.com' && !Object.hasOwn(body,'invitation_code')) body.invitation_code=(await admin('/invitations','POST',{},201)).code;
         const multipart = body instanceof FormData;
         const r = await fetch(base + '/api' + path, { signal: AbortSignal.timeout(10000), method, headers: { cookie, 'x-forwarded-for': proxyAddress, ...(!multipart ? { 'Content-Type': 'application/json' } : {}), ...(withCsrf ? { 'x-csrf-token': csrf } : {}) }, body: body ? (multipart ? body : JSON.stringify(body)) : undefined }).catch(error => { throw new Error(`${method} ${path}: ${error.message}`); });
         const setCookie = r.headers.get('set-cookie'); if (setCookie) cookie = setCookie.split(';')[0];
@@ -61,16 +62,34 @@ test('MySQL-backed community workflows and access controls', { skip: process.env
     }
 
     await guest('/posts', 'GET', undefined, 401);
+    await admin('/session');
+    await admin('/register', 'POST', { name: 'Admin', email: 'admin@example.com', password: 'a-long-password-123', agree: true }, 403);
+    await admin('/register', 'POST', { name: 'Admin', email: 'admin@example.com', password: 'a-long-password-123', agree: true, setup_code: code }, 201);
+    assert.equal((await admin('/session')).user.admin, true);
     await a('/session');
     await a('/register', 'POST', { name: 'Mom A', email: 'a@example.com', password: 'a-long-password-123', agree: true, city: 'Austin' }, 403, false);
     await a('/register', 'POST', { name: 'Mom A', email: 'a@example.com', password: 'a-long-password-123', agree: true, city: 'Austin' }, 201);
     const userA = (await a('/session')).user;
     await b('/session'); await b('/register', 'POST', { name: 'Mom B', email: 'b@example.com', password: 'a-long-password-123', agree: true }, 201); const userB = (await b('/session')).user;
-    await admin('/session');
-    await admin('/register', 'POST', { name: 'Admin', email: 'admin@example.com', password: 'a-long-password-123', agree: true }, 403);
-    await admin('/register', 'POST', { name: 'Admin', email: 'admin@example.com', password: 'a-long-password-123', agree: true, setup_code: code }, 201);
-    assert.equal((await admin('/session')).user.admin, true);
 
+
+    const reject=client();await reject('/session');
+    for(const invitation_code of ['', 'invalid', 'a'.repeat(48)]){
+      await reject('/register','POST',{name:'No invite',email:'no-invite@example.com',password:'a-long-password-123',agree:true,invitation_code},400);
+    }
+    const checkCode=(await admin('/invitations','POST',{},201)).code;
+    const verified=await admin('/admin/invite-logs/verify','POST',{code:checkCode});
+    assert.equal(verified.found,true);assert.equal(verified.invitation.status,'active');
+    assert.equal(verified.invitation.code_hash,undefined);
+    assert.equal((await admin('/admin/invite-logs/verify','POST',{code:'invalid'})).found,false);
+    const inviteLogs=await admin('/admin/invite-logs?issuer='+verified.invitation.issuer_id+'&status=active');
+    assert.ok(inviteLogs.logs.some(i=>i.id===verified.invitation.id));
+    await admin('/invitations/'+verified.invitation.id,'DELETE');
+    assert.equal((await admin('/admin/invite-logs/verify','POST',{code:checkCode})).invitation.status,'revoked');
+    await reject('/register','POST',{name:'No invite',email:'no-invite@example.com',password:'a-long-password-123',agree:true,invitation_code:checkCode},400);
+    const verifyDb=await mysql.createConnection({host:'127.0.0.1',port:3306,user:'root',password:'integration-only-password',database:'momsvillage_test'});
+    try{const [rows]=await verifyDb.execute("SELECT id FROM users WHERE email='no-invite@example.com'");assert.equal(rows.length,0);}finally{await verifyDb.end();}
+    await guest('/admin/invite-logs','GET',undefined,401);
     assert.equal((await guest('/announcement')).announcement,null);
     await guest('/session');await guest('/admin/announcement','GET',undefined,401);
     let banner=await admin('/admin/announcement');assert.equal(banner.enabled,false);
@@ -93,6 +112,8 @@ test('MySQL-backed community workflows and access controls', { skip: process.env
     await a('/verification/attempts','POST',{consent:true},403);
     await approveMember(a,userA.id); await approveMember(b,userB.id);
 
+    await b('/admin/invite-logs','GET',undefined,403);
+    await b('/admin/invite-logs/verify','POST',{code:checkCode},403);
     await b('/admin', 'GET', undefined, 403);
     await b('/admin/announcement','GET',undefined,403);
     await b('/admin/announcement','PUT',{revision:1,title:'Unauthorized',body:'No',tone:'info',enabled:true},403);
@@ -337,6 +358,8 @@ test('MySQL-backed community workflows and access controls', { skip: process.env
     assert.equal(demotions.filter(r => r.status === 'fulfilled').length, 1);
     if (!(await admin('/session')).user.admin) await b(`/admin/users/${ownerId}/role`, 'PATCH', { is_admin: true });
     await admin(`/admin/users/${userB.id}/role`, 'PATCH', { is_admin: false });
+    await b('/admin/invite-logs','GET',undefined,403);
+    await b('/admin/invite-logs/verify','POST',{code:checkCode},403);
     await b('/admin', 'GET', undefined, 403);
     await admin(`/admin/users/${ownerId}/role`, 'PATCH', { is_admin: false }, 400);
 
@@ -349,6 +372,8 @@ test('MySQL-backed community workflows and access controls', { skip: process.env
     await admin(`/admin/users/${userB.id}/developer-badge`, 'PATCH', { enabled: true });
     assert.equal((await b('/session')).user.developer_badge, true);
     assert.equal((await b('/session')).user.admin, false);
+    await b('/admin/invite-logs','GET',undefined,403);
+    await b('/admin/invite-logs/verify','POST',{code:checkCode},403);
     await b('/admin', 'GET', undefined, 403);
     const badgeProfile = await a(`/members/${userB.id}`);
     assert.equal(badgeProfile.developer_badge, 1); assert.equal(badgeProfile.email, undefined);
@@ -379,6 +404,8 @@ test('MySQL-backed community workflows and access controls', { skip: process.env
     await admin(`/admin/users/${userB.id}/badges/tester`, 'PATCH', { enabled: 'yes' }, 400);
     const specialBadges = (await b('/session')).user;
     assert.equal(specialBadges.founding_member_badge, true); assert.equal(specialBadges.tester_badge, true); assert.equal(specialBadges.admin, false);
+    await b('/admin/invite-logs','GET',undefined,403);
+    await b('/admin/invite-logs/verify','POST',{code:checkCode},403);
     await b('/admin', 'GET', undefined, 403);
     const publicBadges = await a(`/members/${userB.id}`);
     assert.equal(publicBadges.founding_member_badge, 1); assert.equal(publicBadges.tester_badge, 1);
